@@ -43,7 +43,7 @@ class SetupActivity : Activity() {
         url = EditText(this).apply {
             hint = "https://eksempel.dk"
             setText(prefs.getString("url", ""))
-            singleLine = true
+            setSingleLine(true)
         }
 
         layout.addView(url)
