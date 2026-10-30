@@ -25,6 +25,10 @@ class SetupActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        appWidgetId = intent?.extras?.getInt(
+    AppWidgetManager.EXTRA_APPWIDGET_ID,
+    AppWidgetManager.INVALID_APPWIDGET_ID
+) ?: AppWidgetManager.INVALID_APPWIDGET_ID
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
