@@ -38,9 +38,8 @@ class HtmlWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onEnabled(context: Context) {
-        super.onEnabled(context)
-        HtmlRenderService.start(context)
-    }
+    super.onEnabled(context)
+}
 
     companion object {
 
@@ -118,8 +117,11 @@ class HtmlWidgetProvider : AppWidgetProvider() {
              * eksisterende renderer.
              */
             if (website.isNullOrBlank()) {
-                HtmlRenderService.start(context)
-            }
+    HtmlRenderService.start(
+        context,
+        id
+    )
+}
         }
     }
 }
