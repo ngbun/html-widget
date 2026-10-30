@@ -142,21 +142,25 @@ if (website.isNotEmpty()) {
                         request
                     )
 
-                val manager =
-                    AppWidgetManager.getInstance(this@SetupActivity)
+                if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
 
-                val ids = manager.getAppWidgetIds(
-                    ComponentName(
-                        this@SetupActivity,
-                        HtmlWidgetProvider::class.java
-                    )
-                )
+    HtmlWidgetProvider.refresh(
+        this@SetupActivity,
+        intArrayOf(appWidgetId)
+    )
 
-                HtmlWidgetProvider.refresh(
-                    this@SetupActivity,
-                    ids
-                )
+    val resultValue = Intent().apply {
+        putExtra(
+            AppWidgetManager.EXTRA_APPWIDGET_ID,
+            appWidgetId
+        )
+    }
 
+    setResult(
+        RESULT_OK,
+        resultValue
+    )
+                }
                 Toast.makeText(
                     this@SetupActivity,
                     "Gemt – HTML Widget er opdateret",
