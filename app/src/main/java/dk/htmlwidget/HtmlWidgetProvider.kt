@@ -58,10 +58,14 @@ class HtmlWidgetProvider : AppWidgetProvider() {
                 Context.MODE_PRIVATE
             )
 
-            val website =
-                prefs.getString("url", null)
+            
 
             ids.forEach { id ->
+                val website =
+    prefs.getString(
+        "url_$id",
+        null
+    )
 
                 val views = RemoteViews(
                     context.packageName,
