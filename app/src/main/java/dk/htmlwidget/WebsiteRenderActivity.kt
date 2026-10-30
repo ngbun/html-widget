@@ -2,7 +2,6 @@ package dk.htmlwidget
 
 import android.app.Activity
 import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.os.Bundle
@@ -47,14 +46,7 @@ if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
             return
         }
 
-        val manager = AppWidgetManager.getInstance(this)
-
-        val ids = manager.getAppWidgetIds(
-            ComponentName(
-                this,
-                HtmlWidgetProvider::class.java
-            )
-        )
+        val ids = intArrayOf(appWidgetId)
 
         if (ids.isEmpty()) {
             finish()
