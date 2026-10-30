@@ -15,7 +15,6 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
@@ -29,7 +28,9 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+
         handler.post { render() }
+
         return START_NOT_STICKY
     }
 
@@ -47,10 +48,12 @@ class HtmlRenderService : Service() {
         }
 
         val html = try {
+
             contentResolver
                 .openInputStream(Uri.parse(localUri))
                 ?.bufferedReader()
                 ?.use { it.readText() }
+
         } catch (_: Exception) {
             null
         }
@@ -76,54 +79,70 @@ class HtmlRenderService : Service() {
             return
         }
 
+        /*
+         * Widgettens faktiske Android-størrelse.
+         */
         val options =
             manager.getAppWidgetOptions(ids[0])
 
         val density =
             resources.displayMetrics.density
 
-        val widgetWidth =
+        val width =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
                     300
                 ) * density
-            ).roundToInt()
+            )
+                .roundToInt()
+                .coerceAtLeast(1)
 
-        val widgetHeight =
+        val height =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
                     180
                 ) * density
-            ).roundToInt()
+            )
+                .roundToInt()
+                .coerceAtLeast(1)
 
         val web = WebView(this)
 
+        /*
+         * VIGTIGT:
+         * Behold software-rendering.
+         * Det var dét, der fik WebView-billedet
+         * til at fungere på din telefon.
+         */
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
             null
         )
 
         web.settings.apply {
+
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
+
             useWideViewPort = true
             loadWithOverviewMode = false
         }
 
         /*
-         * Første størrelse er kun arbejdsområdet.
-         * Den endelige størrelse findes fra HTML'en.
+         * WebView = widgetstørrelsen.
+         *
+         * Vi ændrer ALDRIG størrelsen bagefter.
          */
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
-                1000,
+                width,
                 View.MeasureSpec.EXACTLY
             ),
             View.MeasureSpec.makeMeasureSpec(
-                1000,
+                height,
                 View.MeasureSpec.EXACTLY
             )
         )
@@ -131,8 +150,8 @@ class HtmlRenderService : Service() {
         web.layout(
             0,
             0,
-            1000,
-            1000
+            width,
+            height
         )
 
         web.webViewClient =
@@ -144,23 +163,49 @@ class HtmlRenderService : Service() {
                 ) {
 
                     /*
-                     * Vent på at priserne er hentet
-                     * og alle 24 kolonner er oprettet.
+                     * Vent på:
+                     *
+                     * 1. elpriser
+                     * 2. alle 24 kolonner
+                     * 3. HTML'ens egen fitGrid()
                      */
                     handler.postDelayed({
 
-                        preparePage(
-                            web,
-                            manager,
-                            ids,
-                            widgetWidth,
-                            widgetHeight
-                        )
+                        /*
+                         * Send resize-event.
+                         * Din widget-HTML bruger dette
+                         * til at køre fitGrid igen.
+                         */
+                        web.evaluateJavascript(
+                            """
+                            window.dispatchEvent(
+                                new Event('resize')
+                            );
+                            """.trimIndent()
+                        ) {
+
+                            handler.postDelayed({
+
+                                makeBitmap(
+                                    web,
+                                    manager,
+                                    ids,
+                                    width,
+                                    height
+                                )
+
+                            }, 1200)
+                        }
 
                     }, 4000)
                 }
             }
 
+        /*
+         * Ingen CSS injiceres.
+         * Ingen bredde ændres.
+         * Ingen tabel måles af Android.
+         */
         web.loadDataWithBaseURL(
             localUri,
             html,
@@ -170,222 +215,53 @@ class HtmlRenderService : Service() {
         )
     }
 
-    private fun preparePage(
-        web: WebView,
-        manager: AppWidgetManager,
-        ids: IntArray,
-        widgetWidth: Int,
-        widgetHeight: Int
-    ) {
-
-        web.evaluateJavascript(
-            """
-            (function() {
-
-                /*
-                 * SPECIAL CASE:
-                 * Hvis siden har #grid og .wrap,
-                 * bruger vi selve tabellens fulde bredde.
-                 */
-                var grid =
-                    document.querySelector('#grid');
-
-                var wrap =
-                    document.querySelector('.wrap');
-
-                if (grid && wrap) {
-
-                    var gridWidth =
-                        Math.ceil(
-                            Math.max(
-                                grid.scrollWidth,
-                                grid.offsetWidth
-                            )
-                        );
-
-                    /*
-                     * Fjern den vandrette scroll-container.
-                     * Nu bliver ALLE 24 timer en del af
-                     * selve siden.
-                     */
-                    wrap.style.maxWidth = 'none';
-                    wrap.style.width =
-                        gridWidth + 'px';
-
-                    wrap.style.overflow = 'visible';
-
-                    document.body.style.width =
-                        (gridWidth + 24) + 'px';
-
-                    document.documentElement.style.width =
-                        (gridWidth + 24) + 'px';
-                }
-
-                /*
-                 * GENEREL FALLBACK:
-                 * Virker også med andre HTML-filer.
-                 */
-                var width =
-                    Math.ceil(
-                        Math.max(
-                            document.body.scrollWidth,
-                            document.documentElement.scrollWidth,
-                            grid ? grid.scrollWidth : 0
-                        )
-                    );
-
-                var height =
-                    Math.ceil(
-                        Math.max(
-                            document.body.scrollHeight,
-                            document.documentElement.scrollHeight
-                        )
-                    );
-
-                return width + "," + height;
-
-            })();
-            """.trimIndent()
-        ) { result ->
-
-            val parts =
-                result
-                    .replace("\"", "")
-                    .trim()
-                    .split(",")
-
-            val width =
-                parts
-                    .getOrNull(0)
-                    ?.toIntOrNull()
-                    ?.coerceIn(200, 5000)
-                    ?: 1000
-
-            val height =
-                parts
-                    .getOrNull(1)
-                    ?.toIntOrNull()
-                    ?.coerceIn(100, 2000)
-                    ?: 1000
-
-            /*
-             * NU ændrer vi WebView'en til den fundne
-             * fulde størrelse.
-             */
-            web.measure(
-                View.MeasureSpec.makeMeasureSpec(
-                    width,
-                    View.MeasureSpec.EXACTLY
-                ),
-                View.MeasureSpec.makeMeasureSpec(
-                    height,
-                    View.MeasureSpec.EXACTLY
-                )
-            )
-
-            web.layout(
-                0,
-                0,
-                width,
-                height
-            )
-
-            web.invalidate()
-
-            handler.postDelayed({
-
-                makeBitmap(
-                    web,
-                    manager,
-                    ids,
-                    width,
-                    height,
-                    widgetWidth,
-                    widgetHeight
-                )
-
-            }, 1200)
-        }
-    }
-
     private fun makeBitmap(
         web: WebView,
         manager: AppWidgetManager,
         ids: IntArray,
-        contentWidth: Int,
-        contentHeight: Int,
-        widgetWidth: Int,
-        widgetHeight: Int
+        width: Int,
+        height: Int
     ) {
 
-        val fullBitmap =
-            Bitmap.createBitmap(
-                contentWidth,
-                contentHeight,
-                Bitmap.Config.ARGB_8888
-            )
+        web.invalidate()
 
-        val canvas =
-            Canvas(fullBitmap)
+        handler.postDelayed({
 
-        web.draw(canvas)
-
-        /*
-         * Hele siden skal være synlig.
-         * Samme skalering bruges i begge retninger.
-         */
-        val scale =
-            min(
-                widgetWidth.toFloat() /
-                    contentWidth.toFloat(),
-
-                widgetHeight.toFloat() /
-                    contentHeight.toFloat()
-            )
-
-        val finalWidth =
-            (contentWidth * scale)
-                .roundToInt()
-                .coerceAtLeast(1)
-
-        val finalHeight =
-            (contentHeight * scale)
-                .roundToInt()
-                .coerceAtLeast(1)
-
-        val fittedBitmap =
-            Bitmap.createScaledBitmap(
-                fullBitmap,
-                finalWidth,
-                finalHeight,
-                true
-            )
-
-        ids.forEach { id ->
-
-            val views =
-                RemoteViews(
-                    packageName,
-                    R.layout.widget_layout
+            val bitmap =
+                Bitmap.createBitmap(
+                    width,
+                    height,
+                    Bitmap.Config.ARGB_8888
                 )
 
-            views.setImageViewBitmap(
-                R.id.widget_image,
-                fittedBitmap
-            )
+            val canvas =
+                Canvas(bitmap)
 
-            manager.updateAppWidget(
-                id,
-                views
-            )
-        }
+            web.draw(canvas)
 
-        if (fittedBitmap !== fullBitmap) {
-            fullBitmap.recycle()
-        }
+            ids.forEach { id ->
 
-        web.destroy()
-        stopSelf()
+                val views =
+                    RemoteViews(
+                        packageName,
+                        R.layout.widget_layout
+                    )
+
+                views.setImageViewBitmap(
+                    R.id.widget_image,
+                    bitmap
+                )
+
+                manager.updateAppWidget(
+                    id,
+                    views
+                )
+            }
+
+            web.destroy()
+            stopSelf()
+
+        }, 300)
     }
 
     companion object {
