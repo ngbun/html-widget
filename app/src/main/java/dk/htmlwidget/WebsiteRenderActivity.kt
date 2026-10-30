@@ -9,6 +9,8 @@ import android.os.Bundle
 import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.widget.RemoteViews
 import kotlin.math.roundToInt
 
@@ -95,7 +97,61 @@ class WebsiteRenderActivity : Activity() {
         setContentView(web)
 
         web.webViewClient =
-            object : WebViewClient() {
+            object : WebViewClient() { override fun shouldInterceptRequest(
+    view: WebView?,
+    request: WebResourceRequest?
+): WebResourceResponse? {
+
+    val adBlock = getSharedPreferences(
+        "settings",
+        MODE_PRIVATE
+    ).getBoolean("adblock", false)
+
+    if (!adBlock) {
+        return super.shouldInterceptRequest(
+            view,
+            request
+        )
+    }
+
+    val host =
+        request?.url?.host
+            ?.lowercase()
+            ?: return super.shouldInterceptRequest(
+                view,
+                request
+            )
+
+    val blocked = listOf(
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "adservice.google.com",
+        "adnxs.com",
+        "criteo.com",
+        "criteo.net",
+        "scorecardresearch.com",
+        "taboola.com",
+        "outbrain.com"
+    )
+
+    if (blocked.any {
+            host == it ||
+            host.endsWith(".$it")
+        }) {
+
+        return WebResourceResponse(
+            "text/plain",
+            "UTF-8",
+            null
+        )
+    }
+
+    return super.shouldInterceptRequest(
+        view,
+        request
+    )
+            }
 
                 override fun onPageFinished(
                     view: WebView?,
