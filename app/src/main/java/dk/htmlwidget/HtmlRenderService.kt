@@ -15,6 +15,7 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
@@ -28,13 +29,11 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-
-        handler.post { renderHtml() }
-
+        handler.post { startRender() }
         return START_NOT_STICKY
     }
 
-    private fun renderHtml() {
+    private fun startRender() {
 
         val prefs =
             getSharedPreferences("settings", MODE_PRIVATE)
@@ -48,13 +47,11 @@ class HtmlRenderService : Service() {
         }
 
         val html = try {
-
             contentResolver
                 .openInputStream(Uri.parse(localUri))
                 ?.bufferedReader()
                 ?.use { it.readText() }
-
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
 
@@ -62,6 +59,166 @@ class HtmlRenderService : Service() {
             stopSelf()
             return
         }
+
+        /*
+         * TRIN 1
+         * Måle-WebView.
+         */
+        val measureWeb = WebView(this)
+
+        measureWeb.setLayerType(
+            View.LAYER_TYPE_SOFTWARE,
+            null
+        )
+
+        measureWeb.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadsImagesAutomatically = true
+            useWideViewPort = true
+            loadWithOverviewMode = false
+        }
+
+        /*
+         * Start med en almindelig viewport.
+         * HTML'en får selv lov til at bygge tabellen.
+         */
+        val measureWidth = 1000
+        val measureHeight = 1000
+
+        measureWeb.measure(
+            View.MeasureSpec.makeMeasureSpec(
+                measureWidth,
+                View.MeasureSpec.EXACTLY
+            ),
+            View.MeasureSpec.makeMeasureSpec(
+                measureHeight,
+                View.MeasureSpec.EXACTLY
+            )
+        )
+
+        measureWeb.layout(
+            0,
+            0,
+            measureWidth,
+            measureHeight
+        )
+
+        measureWeb.webViewClient =
+            object : WebViewClient() {
+
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+
+                    /*
+                     * Vent på elpriserne og tabellen.
+                     */
+                    handler.postDelayed({
+
+                        /*
+                         * Find det bredeste element.
+                         *
+                         * scrollWidth er vigtigt for tabeller
+                         * og andre elementer, der går ud over
+                         * den synlige viewport.
+                         */
+                        measureWeb.evaluateJavascript(
+                            """
+                            (function() {
+
+                                var all =
+                                    document.querySelectorAll('*');
+
+                                var widest = 0;
+
+                                for (
+                                    var i = 0;
+                                    i < all.length;
+                                    i++
+                                ) {
+
+                                    var el = all[i];
+
+                                    var style =
+                                        window.getComputedStyle(el);
+
+                                    if (
+                                        style.display === 'none' ||
+                                        style.visibility === 'hidden'
+                                    ) {
+                                        continue;
+                                    }
+
+                                    widest = Math.max(
+                                        widest,
+                                        el.scrollWidth || 0,
+                                        el.offsetWidth || 0
+                                    );
+                                }
+
+                                widest = Math.max(
+                                    widest,
+                                    document.body.scrollWidth,
+                                    document.documentElement.scrollWidth
+                                );
+
+                                return Math.ceil(widest);
+
+                            })();
+                            """.trimIndent()
+                        ) { result ->
+
+                            val naturalWidth =
+                                result
+                                    .replace("\"", "")
+                                    .trim()
+                                    .toIntOrNull()
+                                    ?: 1000
+
+                            /*
+                             * Lidt ekstra plads til sidste
+                             * kolonne og afrunding.
+                             */
+                            val renderWidth =
+                                (naturalWidth + 40)
+                                    .coerceIn(
+                                        400,
+                                        6000
+                                    )
+
+                            measureWeb.destroy()
+
+                            /*
+                             * TRIN 2
+                             * Ny WebView i den målte bredde.
+                             */
+                            renderFullHtml(
+                                html,
+                                localUri,
+                                renderWidth
+                            )
+                        }
+
+                    }, 4000)
+                }
+            }
+
+        measureWeb.loadDataWithBaseURL(
+            localUri,
+            html,
+            "text/html",
+            "UTF-8",
+            null
+        )
+    }
+
+    private fun renderFullHtml(
+        html: String,
+        localUri: String,
+        renderWidth: Int
+    ) {
 
         val manager =
             AppWidgetManager.getInstance(this)
@@ -85,9 +242,6 @@ class HtmlRenderService : Service() {
         val density =
             resources.displayMetrics.density
 
-        /*
-         * Den RIGTIGE størrelse på widgetten.
-         */
         val widgetWidth =
             (
                 options.getInt(
@@ -96,7 +250,7 @@ class HtmlRenderService : Service() {
                 ) * density
             )
                 .roundToInt()
-                .coerceAtLeast(300)
+                .coerceAtLeast(1)
 
         val widgetHeight =
             (
@@ -106,44 +260,36 @@ class HtmlRenderService : Service() {
                 ) * density
             )
                 .roundToInt()
-                .coerceAtLeast(200)
+                .coerceAtLeast(1)
 
         val web = WebView(this)
 
-        /*
-         * Denne beholder vi.
-         * Uden software-rendering fik vi tidligere
-         * kun en tom/sort widget.
-         */
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
             null
         )
 
         web.settings.apply {
-
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
-
             useWideViewPort = true
             loadWithOverviewMode = false
-
-            builtInZoomControls = false
-            displayZoomControls = false
         }
 
         /*
-         * WebView'en ændres IKKE senere.
-         * Den får widgettens størrelse fra starten.
+         * Stor nok højde til at siden kan bygges.
+         * Den rigtige højde måles bagefter.
          */
+        val workHeight = 1800
+
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
-                widgetWidth,
+                renderWidth,
                 View.MeasureSpec.EXACTLY
             ),
             View.MeasureSpec.makeMeasureSpec(
-                widgetHeight,
+                workHeight,
                 View.MeasureSpec.EXACTLY
             )
         )
@@ -151,8 +297,8 @@ class HtmlRenderService : Service() {
         web.layout(
             0,
             0,
-            widgetWidth,
-            widgetHeight
+            renderWidth,
+            workHeight
         )
 
         web.webViewClient =
@@ -163,14 +309,47 @@ class HtmlRenderService : Service() {
                     url: String?
                 ) {
 
-                    /*
-                     * Din elpris-HTML henter priser med
-                     * JavaScript, så vi giver den tid
-                     * til at bygge hele tabellen først.
-                     */
                     handler.postDelayed({
 
-                        fitHtml(web)
+                        /*
+                         * Nu måler vi kun højden.
+                         * Bredden ændrer vi ikke længere.
+                         */
+                        web.evaluateJavascript(
+                            """
+                            (function() {
+
+                                return Math.ceil(
+                                    Math.max(
+                                        document.body.scrollHeight,
+                                        document.body.offsetHeight,
+                                        document.documentElement.scrollHeight,
+                                        document.documentElement.offsetHeight
+                                    )
+                                );
+
+                            })();
+                            """.trimIndent()
+                        ) { result ->
+
+                            val contentHeight =
+                                result
+                                    .replace("\"", "")
+                                    .trim()
+                                    .toIntOrNull()
+                                    ?.coerceIn(200, workHeight)
+                                    ?: workHeight
+
+                            makeBitmap(
+                                web,
+                                manager,
+                                ids,
+                                renderWidth,
+                                contentHeight,
+                                widgetWidth,
+                                widgetHeight
+                            )
+                        }
 
                     }, 4000)
                 }
@@ -185,153 +364,57 @@ class HtmlRenderService : Service() {
         )
     }
 
-    private fun fitHtml(
-        web: WebView
-    ) {
-
-        /*
-         * JavaScript måler hele dokumentets naturlige
-         * bredde og højde.
-         *
-         * Derefter beregnes én zoom-faktor, så både
-         * bredde OG højde kan være i viewporten.
-         *
-         * Smalle HTML-sider bliver ikke gjort mindre
-         * end nødvendigt.
-         */
-        web.evaluateJavascript(
-            """
-            (function() {
-
-                document.body.style.zoom = '1';
-
-                var doc =
-                    document.documentElement;
-
-                var body =
-                    document.body;
-
-                var viewportWidth =
-                    doc.clientWidth;
-
-                var viewportHeight =
-                    doc.clientHeight;
-
-                var contentWidth =
-                    Math.max(
-                        body.scrollWidth,
-                        body.offsetWidth,
-                        doc.scrollWidth,
-                        doc.offsetWidth
-                    );
-
-                var contentHeight =
-                    Math.max(
-                        body.scrollHeight,
-                        body.offsetHeight,
-                        doc.scrollHeight,
-                        doc.offsetHeight
-                    );
-
-                var scaleX =
-                    viewportWidth / contentWidth;
-
-                var scaleY =
-                    viewportHeight / contentHeight;
-
-                var scale =
-                    Math.min(
-                        1,
-                        scaleX,
-                        scaleY
-                    );
-
-                /*
-                 * En lille margin så sidste kolonne
-                 * ikke rammer helt ud i kanten.
-                 */
-                scale = scale * 0.97;
-
-                document.body.style.transformOrigin =
-                    'top left';
-
-                document.body.style.zoom =
-                    scale.toString();
-
-                document.documentElement.style.overflow =
-                    'hidden';
-
-                document.body.style.overflow =
-                    'visible';
-
-                return scale.toString();
-
-            })();
-            """.trimIndent()
-        ) {
-
-            /*
-             * Giv Chromium tid til at tegne siden
-             * igen efter zoom.
-             */
-            handler.postDelayed({
-
-                makeBitmap(web)
-
-            }, 1500)
-        }
-    }
-
     private fun makeBitmap(
-        web: WebView
+        web: WebView,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        contentWidth: Int,
+        contentHeight: Int,
+        widgetWidth: Int,
+        widgetHeight: Int
     ) {
+
+        val fullBitmap =
+            Bitmap.createBitmap(
+                contentWidth,
+                contentHeight,
+                Bitmap.Config.ARGB_8888
+            )
+
+        val canvas =
+            Canvas(fullBitmap)
+
+        web.draw(canvas)
 
         /*
-         * Tving endnu en draw/layout-cyklus.
+         * Én proportional skala.
+         * Intet bliver strukket eller beskåret.
          */
-        web.invalidate()
+        val scale =
+            min(
+                widgetWidth.toFloat() /
+                    contentWidth.toFloat(),
 
-        handler.postDelayed({
+                widgetHeight.toFloat() /
+                    contentHeight.toFloat()
+            ).coerceAtMost(1f)
 
-            val width =
-                web.width.coerceAtLeast(1)
+        val finalWidth =
+            (contentWidth * scale)
+                .roundToInt()
+                .coerceAtLeast(1)
 
-            val height =
-                web.height.coerceAtLeast(1)
+        val finalHeight =
+            (contentHeight * scale)
+                .roundToInt()
+                .coerceAtLeast(1)
 
-            val bitmap =
-                Bitmap.createBitmap(
-                    width,
-                    height,
-                    Bitmap.Config.ARGB_8888
-                )
-
-            val canvas =
-                Canvas(bitmap)
-
-            web.draw(canvas)
-
-            showBitmap(bitmap)
-
-            web.destroy()
-            stopSelf()
-
-        }, 500)
-    }
-
-    private fun showBitmap(
-        bitmap: Bitmap
-    ) {
-
-        val manager =
-            AppWidgetManager.getInstance(this)
-
-        val ids =
-            manager.getAppWidgetIds(
-                ComponentName(
-                    this,
-                    HtmlWidgetProvider::class.java
-                )
+        val fittedBitmap =
+            Bitmap.createScaledBitmap(
+                fullBitmap,
+                finalWidth,
+                finalHeight,
+                true
             )
 
         ids.forEach { id ->
@@ -344,7 +427,7 @@ class HtmlRenderService : Service() {
 
             views.setImageViewBitmap(
                 R.id.widget_image,
-                bitmap
+                fittedBitmap
             )
 
             manager.updateAppWidget(
@@ -352,6 +435,13 @@ class HtmlRenderService : Service() {
                 views
             )
         }
+
+        if (fittedBitmap !== fullBitmap) {
+            fullBitmap.recycle()
+        }
+
+        web.destroy()
+        stopSelf()
     }
 
     companion object {
