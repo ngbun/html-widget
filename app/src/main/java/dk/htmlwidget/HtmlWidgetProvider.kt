@@ -38,8 +38,8 @@ class HtmlWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onEnabled(context: Context) {
-    super.onEnabled(context)
-}
+        super.onEnabled(context)
+    }
 
     companion object {
 
@@ -52,40 +52,51 @@ class HtmlWidgetProvider : AppWidgetProvider() {
             val manager =
                 AppWidgetManager.getInstance(context)
 
-            val prefs = context.getSharedPreferences(
-                "settings",
-                Context.MODE_PRIVATE
-            )
-
-            
-
-            ids.forEach { id ->
-                val website =
-    prefs.getString(
-        "url_$id",
-        null
-    )
-
-                val views = RemoteViews(
-                    context.packageName,
-                    R.layout.widget_layout
+            val prefs =
+                context.getSharedPreferences(
+                    "settings",
+                    Context.MODE_PRIVATE
                 )
 
+            ids.forEach { id ->
+
+                val website =
+                    prefs.getString(
+                        "url_$id",
+                        null
+                    )
+
+                val localUri =
+                    prefs.getString(
+                        "localUri_$id",
+                        null
+                    )
+
                 /*
-                 * Hvis der er valgt en hjemmeside,
-                 * åbner et tryk på widgetten den
-                 * fungerende WebsiteRenderActivity.
+                 * HJEMMESIDE
+                 *
+                 * Vi overskriver IKKE billedet.
+                 * Det eksisterende billede bliver stående.
+                 *
+                 * Et tryk på widgetten åbner
+                 * WebsiteRenderActivity.
                  */
                 if (!website.isNullOrBlank()) {
+
+                    val views = RemoteViews(
+                        context.packageName,
+                        R.layout.widget_layout
+                    )
 
                     val intent = Intent(
                         context,
                         WebsiteRenderActivity::class.java
                     ).apply {
                         putExtra(
-    AppWidgetManager.EXTRA_APPWIDGET_ID,
-    id
-)
+                            AppWidgetManager.EXTRA_APPWIDGET_ID,
+                            id
+                        )
+
                         flags =
                             Intent.FLAG_ACTIVITY_NEW_TASK or
                             Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -97,28 +108,33 @@ class HtmlWidgetProvider : AppWidgetProvider() {
                             id,
                             intent,
                             PendingIntent.FLAG_UPDATE_CURRENT or
-                                PendingIntent.FLAG_IMMUTABLE
+                            PendingIntent.FLAG_IMMUTABLE
                         )
 
                     views.setOnClickPendingIntent(
                         R.id.widget_image,
                         pendingIntent
                     )
+
+                    manager.updateAppWidget(
+                        id,
+                        views
+                    )
+
+                    return@forEach
                 }
 
-                manager.updateAppWidget(
-                    id,
-                    views
-                )
-            
+                /*
+                 * LOKAL HTML
+                 */
+                if (!localUri.isNullOrBlank()) {
 
-            if (website.isNullOrBlank()) {
-    HtmlRenderService.start(
-        context,
-        id
-    )
-}
+                    HtmlRenderService.start(
+                        context,
+                        id
+                    )
+                }
+            }
         }
     }
-}
 }
