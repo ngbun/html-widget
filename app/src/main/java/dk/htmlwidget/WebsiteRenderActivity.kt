@@ -21,11 +21,23 @@ class WebsiteRenderActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val appWidgetId = intent.getIntExtra(
+    AppWidgetManager.EXTRA_APPWIDGET_ID,
+    AppWidgetManager.INVALID_APPWIDGET_ID
+)
+
+if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+    finish()
+    return
+}
 
         val address = getSharedPreferences(
             "settings",
             MODE_PRIVATE
-        ).getString("url", "")?.trim() ?: ""
+        ).getString(
+    "url_$appWidgetId",
+    ""
+)?.trim() ?: ""
 
         if (
             !address.startsWith("https://") &&
