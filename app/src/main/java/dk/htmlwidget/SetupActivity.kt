@@ -120,19 +120,7 @@ remove("url_$appWidgetId")
 
     apply()
 }
-if (website.isNotEmpty()) {
-    startActivity(
-        Intent(
-            this@SetupActivity,
-            WebsiteRenderActivity::class.java
-        ).apply {
-            putExtra(
-                AppWidgetManager.EXTRA_APPWIDGET_ID,
-                appWidgetId
-            )
-        }
-    )
-}
+
                 val request =
                     PeriodicWorkRequestBuilder<RefreshWorker>(
                         15,
