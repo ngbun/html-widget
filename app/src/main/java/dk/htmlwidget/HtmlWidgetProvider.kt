@@ -110,12 +110,8 @@ class HtmlWidgetProvider : AppWidgetProvider() {
                     id,
                     views
                 )
-            }
+            
 
-            /*
-             * Lokal HTML fortsætter med den
-             * eksisterende renderer.
-             */
             if (website.isNullOrBlank()) {
     HtmlRenderService.start(
         context,
