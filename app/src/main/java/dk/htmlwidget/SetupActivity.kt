@@ -165,6 +165,7 @@ if (website.isNotEmpty()) {
         RESULT_OK,
         resultValue
     )
+    finish()
                 }
                 Toast.makeText(
                     this@SetupActivity,
