@@ -81,15 +81,35 @@ class SetupActivity : Activity() {
 
             setOnClickListener {
 
-                prefs.edit()
-                    .putString("url", url.text.toString().trim())
-                    .putString(
-                        "localUri",
-                        localUri?.toString()
-                            ?: prefs.getString("localUri", null)
-                    )
-                    .putBoolean("adblock", adBlock.isChecked)
-                    .apply()
+                val website = url.text.toString().trim()
+
+prefs.edit().apply {
+
+    if (website.isNotEmpty()) {
+
+        // Hjemmeside valgt:
+        // gem URL og fjern gammel HTML-fil
+        putString("url", website)
+        remove("localUri")
+
+    } else if (localUri != null) {
+
+        // HTML-fil valgt:
+        // gem filen og fjern gammel hjemmeside
+        putString(
+            "localUri",
+            localUri.toString()
+        )
+        remove("url")
+    }
+
+    putBoolean(
+        "adblock",
+        adBlock.isChecked
+    )
+
+    apply()
+}
 
                 val request =
                     PeriodicWorkRequestBuilder<RefreshWorker>(
