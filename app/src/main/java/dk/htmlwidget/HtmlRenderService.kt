@@ -39,29 +39,14 @@ class HtmlRenderService : Service() {
         val prefs =
             getSharedPreferences("settings", MODE_PRIVATE)
 
+        /*
+         * De to mulige kilder.
+         */
         val localUri =
             prefs.getString("localUri", null)
 
-        if (localUri.isNullOrBlank()) {
-            stopSelf()
-            return
-        }
-
-        val html = try {
-
-            contentResolver
-                .openInputStream(Uri.parse(localUri))
-                ?.bufferedReader()
-                ?.use { it.readText() }
-
-        } catch (_: Exception) {
-            null
-        }
-
-        if (html.isNullOrBlank()) {
-            stopSelf()
-            return
-        }
+        val address =
+            prefs.getString("url", "") ?: ""
 
         val manager =
             AppWidgetManager.getInstance(this)
@@ -79,9 +64,6 @@ class HtmlRenderService : Service() {
             return
         }
 
-        /*
-         * Widgettens faktiske Android-størrelse.
-         */
         val options =
             manager.getAppWidgetOptions(ids[0])
 
@@ -111,10 +93,9 @@ class HtmlRenderService : Service() {
         val web = WebView(this)
 
         /*
-         * VIGTIGT:
-         * Behold software-rendering.
-         * Det var dét, der fik WebView-billedet
-         * til at fungere på din telefon.
+         * DENNE BEHOLDER VI.
+         * Det var software-renderingen,
+         * der fik widgetten til at virke.
          */
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
@@ -132,9 +113,7 @@ class HtmlRenderService : Service() {
         }
 
         /*
-         * WebView = widgetstørrelsen.
-         *
-         * Vi ændrer ALDRIG størrelsen bagefter.
+         * WebView får præcis widgettens størrelse.
          */
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
@@ -163,18 +142,18 @@ class HtmlRenderService : Service() {
                 ) {
 
                     /*
-                     * Vent på:
-                     *
-                     * 1. elpriser
-                     * 2. alle 24 kolonner
-                     * 3. HTML'ens egen fitGrid()
+                     * Vent på JavaScript, billeder,
+                     * priser osv.
                      */
                     handler.postDelayed({
 
                         /*
-                         * Send resize-event.
-                         * Din widget-HTML bruger dette
-                         * til at køre fitGrid igen.
+                         * Hvis det er vores HTML-widget,
+                         * får fitGrid mulighed for at
+                         * tilpasse tabellen igen.
+                         *
+                         * På almindelige hjemmesider
+                         * gør resize-eventet ingen skade.
                          */
                         web.evaluateJavascript(
                             """
@@ -202,16 +181,74 @@ class HtmlRenderService : Service() {
             }
 
         /*
-         * Ingen CSS injiceres.
-         * Ingen bredde ændres.
-         * Ingen tabel måles af Android.
+         * KILDE 1:
+         * Lokal HTML-fil.
          */
-        web.loadDataWithBaseURL(
-            localUri,
-            html,
+        if (!localUri.isNullOrBlank()) {
+
+            val html = try {
+
+                contentResolver
+                    .openInputStream(
+                        Uri.parse(localUri)
+                    )
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+
+            } catch (_: Exception) {
+                null
+            }
+
+            if (!html.isNullOrBlank()) {
+
+                web.loadDataWithBaseURL(
+                    localUri,
+                    html,
+                    "text/html",
+                    "UTF-8",
+                    null
+                )
+
+                return
+            }
+        }
+
+        /*
+         * KILDE 2:
+         * Hjemmeside.
+         */
+        if (
+            address.startsWith("https://") ||
+            address.startsWith("http://")
+        ) {
+
+            web.loadUrl(address)
+
+            return
+        }
+
+        /*
+         * Ingen gyldig kilde.
+         */
+        web.loadData(
+            """
+            <html>
+            <body style="
+                font-family:sans-serif;
+                padding:30px;
+                background:white;
+                color:black;
+            ">
+                <h2>HTML Widget</h2>
+                <p>
+                    Vælg en HTML-fil eller hjemmeside
+                    i appen.
+                </p>
+            </body>
+            </html>
+            """.trimIndent(),
             "text/html",
-            "UTF-8",
-            null
+            "UTF-8"
         )
     }
 
