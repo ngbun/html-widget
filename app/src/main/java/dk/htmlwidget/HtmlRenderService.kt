@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
+import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -29,12 +30,83 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-        main.post { render() }
+        main.post { renderWidgets() }
         return START_NOT_STICKY
     }
 
-    private fun render() {
+    private fun renderWidgets() {
+        val manager = AppWidgetManager.getInstance(this)
 
+        val ids = manager.getAppWidgetIds(
+            ComponentName(this, HtmlWidgetProvider::class.java)
+        )
+
+        if (ids.isEmpty()) {
+            stopSelf()
+            return
+        }
+
+        renderNext(manager, ids, 0)
+    }
+
+    private fun renderNext(
+        manager: AppWidgetManager,
+        ids: IntArray,
+        index: Int
+    ) {
+        if (index >= ids.size) {
+            stopSelf()
+            return
+        }
+
+        val widgetId = ids[index]
+        val options = manager.getAppWidgetOptions(widgetId)
+
+        val minWidthDp = options.getInt(
+            AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+            300
+        )
+
+        val minHeightDp = options.getInt(
+            AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
+            180
+        )
+
+        val density = resources.displayMetrics.density
+
+        val widgetWidth =
+            (minWidthDp * density).toInt().coerceAtLeast(400)
+
+        val widgetHeight =
+            (minHeightDp * density).toInt().coerceAtLeast(220)
+
+        /*
+         * Vi renderer i højere opløsning end selve widgetten.
+         * Det giver skarpere tekst, når Android viser billedet.
+         */
+        val renderWidth =
+            (widgetWidth * 1.5f).toInt().coerceAtMost(1800)
+
+        val renderHeight =
+            (widgetHeight * 1.5f).toInt().coerceAtMost(1200)
+
+        renderWidget(
+            manager,
+            widgetId,
+            renderWidth,
+            renderHeight
+        ) {
+            renderNext(manager, ids, index + 1)
+        }
+    }
+
+    private fun renderWidget(
+        manager: AppWidgetManager,
+        widgetId: Int,
+        width: Int,
+        height: Int,
+        finished: () -> Unit
+    ) {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
 
         val local = prefs.getString("localUri", null)
@@ -43,17 +115,18 @@ class HtmlRenderService : Service() {
 
         val web = WebView(this)
 
-        web.settings.javaScriptEnabled = true
-        web.settings.domStorageEnabled = true
-        web.settings.loadsImagesAutomatically = true
-        web.settings.useWideViewPort = true
-        web.settings.loadWithOverviewMode = true
+        web.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadsImagesAutomatically = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            builtInZoomControls = false
+            displayZoomControls = false
+            setSupportZoom(false)
+        }
 
-        web.setBackgroundColor(
-            android.graphics.Color.WHITE
-        )
-
-        web.layout(0, 0, 900, 560)
+        web.setBackgroundColor(android.graphics.Color.TRANSPARENT)
 
         web.webViewClient = object : WebViewClient() {
 
@@ -63,7 +136,6 @@ class HtmlRenderService : Service() {
             ): WebResourceResponse? {
 
                 if (adBlock) {
-
                     val host =
                         request?.url?.host?.lowercase()
                             ?: return null
@@ -73,47 +145,42 @@ class HtmlRenderService : Service() {
                         "googlesyndication.com",
                         "googleadservices.com",
                         "adservice.google.com",
-                        "googletagmanager.com"
+                        "googletagmanager.com",
+                        "google-analytics.com",
+                        "adnxs.com",
+                        "criteo.com"
                     )
 
                     if (
                         blocked.any {
-                            host == it ||
-                            host.endsWith(".$it")
+                            host == it || host.endsWith(".$it")
                         }
                     ) {
-
                         return WebResourceResponse(
                             "text/plain",
                             "utf-8",
                             204,
                             "Blocked",
                             emptyMap(),
-                            ByteArrayInputStream(
-                                ByteArray(0)
-                            )
+                            ByteArrayInputStream(ByteArray(0))
                         )
                     }
                 }
 
-                return super.shouldInterceptRequest(
-                    view,
-                    request
-                )
+                return super.shouldInterceptRequest(view, request)
             }
 
             override fun onPageFinished(
                 view: WebView?,
                 url: String?
             ) {
-
+                /*
+                 * Giver JavaScript/API-kald i HTML-filen lidt tid til
+                 * at hente priser og tegne tabellen færdig.
+                 */
                 main.postDelayed({
 
                     try {
-
-                        val width = 900
-                        val height = 560
-
                         web.measure(
                             android.view.View.MeasureSpec.makeMeasureSpec(
                                 width,
@@ -125,72 +192,45 @@ class HtmlRenderService : Service() {
                             )
                         )
 
-                        web.layout(
-                            0,
-                            0,
+                        web.layout(0, 0, width, height)
+
+                        val bitmap = Bitmap.createBitmap(
                             width,
-                            height
+                            height,
+                            Bitmap.Config.ARGB_8888
                         )
 
-                        val bitmap =
-                            Bitmap.createBitmap(
-                                width,
-                                height,
-                                Bitmap.Config.ARGB_8888
-                            )
-
                         val canvas = Canvas(bitmap)
-
                         web.draw(canvas)
 
-                        val manager =
-                            AppWidgetManager.getInstance(
-                                this@HtmlRenderService
-                            )
+                        val views = RemoteViews(
+                            packageName,
+                            R.layout.widget_layout
+                        )
 
-                        val ids =
-                            manager.getAppWidgetIds(
-                                ComponentName(
-                                    this@HtmlRenderService,
-                                    HtmlWidgetProvider::class.java
-                                )
-                            )
+                        views.setImageViewBitmap(
+                            R.id.widget_image,
+                            bitmap
+                        )
 
-                        ids.forEach { id ->
-
-                            val views =
-                                RemoteViews(
-                                    packageName,
-                                    R.layout.widget_layout
-                                )
-
-                            views.setImageViewBitmap(
-                                R.id.widget_image,
-                                bitmap
-                            )
-
-                            manager.updateAppWidget(
-                                id,
-                                views
-                            )
-                        }
+                        manager.updateAppWidget(
+                            widgetId,
+                            views
+                        )
 
                     } catch (_: Exception) {
+                    } finally {
+                        web.destroy()
+                        finished()
                     }
 
-                    web.destroy()
-                    stopSelf()
-
-                }, 1800)
+                }, 3500)
             }
         }
 
         when {
-
             !local.isNullOrBlank() -> {
-
                 try {
-
                     val uri = Uri.parse(local)
 
                     val html =
@@ -200,82 +240,5 @@ class HtmlRenderService : Service() {
                             ?.use { it.readText() }
 
                     if (html != null) {
-
                         web.loadDataWithBaseURL(
-                            local,
-                            html,
-                            "text/html",
-                            "UTF-8",
-                            null
-                        )
-
-                    } else {
-
-                        showError(
-                            web,
-                            "Kunne ikke læse HTML-filen."
-                        )
-                    }
-
-                } catch (_: Exception) {
-
-                    showError(
-                        web,
-                        "Kunne ikke åbne HTML-filen."
-                    )
-                }
-            }
-
-            address.startsWith("https://") ||
-            address.startsWith("http://") -> {
-
-                web.loadUrl(address)
-            }
-
-            else -> {
-
-                showError(
-                    web,
-                    "Åbn HTML Widget-appen og vælg en HTML-fil eller hjemmeside."
-                )
-            }
-        }
-    }
-
-    private fun showError(
-        web: WebView,
-        message: String
-    ) {
-
-        web.loadData(
-            """
-            <html>
-            <body style="
-                font-family:sans-serif;
-                padding:30px;
-                background:white;
-                color:black;
-            ">
-            <h2>HTML Widget</h2>
-            <p>$message</p>
-            </body>
-            </html>
-            """.trimIndent(),
-            "text/html",
-            "UTF-8"
-        )
-    }
-
-    companion object {
-
-        fun start(context: Context) {
-
-            context.startService(
-                Intent(
-                    context,
-                    HtmlRenderService::class.java
-                )
-            )
-        }
-    }
-}
+                           
