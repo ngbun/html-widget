@@ -113,7 +113,7 @@ prefs.edit().apply {
 if (website.isNotEmpty()) {
     startActivity(
         Intent(
-            this,
+            this@SetupActivity
             WebsiteRenderActivity::class.java
         )
     )
