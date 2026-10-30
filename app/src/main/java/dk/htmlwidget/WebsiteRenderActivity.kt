@@ -1,4 +1,3 @@
-
 package dk.htmlwidget
 
 import android.app.Activity
@@ -16,6 +15,7 @@ import kotlin.math.roundToInt
 class WebsiteRenderActivity : Activity() {
 
     private lateinit var web: WebView
+    private var finished = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -80,65 +80,87 @@ class WebsiteRenderActivity : Activity() {
             loadsImagesAutomatically = true
             useWideViewPort = true
             loadWithOverviewMode = false
+
+            /*
+             * Hjælper WebView med at holde siden
+             * klar til rendering.
+             */
+            offscreenPreRaster = true
         }
 
         /*
-         * VIGTIGT:
-         * WebView bliver nu sat ind i et rigtigt
-         * Activity-vindue.
+         * WebView skal være synlig og attached
+         * til Activity-vinduet.
          */
         setContentView(web)
 
-        web.webViewClient = object : WebViewClient() {
+        web.webViewClient =
+            object : WebViewClient() {
 
-            override fun onPageFinished(
-                view: WebView?,
-                url: String?
-            ) {
-                web.postDelayed({
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+                    if (finished) return
 
-                    renderWidget(
-                        manager,
-                        ids,
-                        width,
-                        height
-                    )
+                    /*
+                     * DR kan fortsætte med at bygge
+                     * siden efter onPageFinished.
+                     */
+                    web.postDelayed({
 
-                }, 5000)
+                        if (finished) return@postDelayed
+
+                        web.postVisualStateCallback(
+                            1L,
+                            object :
+                                WebView.VisualStateCallback() {
+
+                                override fun onComplete(
+                                    requestId: Long
+                                ) {
+                                    if (finished) return
+
+                                    /*
+                                     * Vent én ekstra frame,
+                                     * mens WebView stadig er
+                                     * synlig på skærmen.
+                                     */
+                                    web.postDelayed({
+
+                                        captureWidget(
+                                            manager,
+                                            ids,
+                                            width,
+                                            height
+                                        )
+
+                                    }, 500)
+                                }
+                            }
+                        )
+
+                    }, 4000)
+                }
             }
-        }
 
         web.loadUrl(address)
     }
 
-    private fun renderWidget(
+    private fun captureWidget(
         manager: AppWidgetManager,
         ids: IntArray,
         width: Int,
         height: Int
     ) {
+        if (finished) return
 
         /*
-         * Vi tegner den synlige WebView
-         * ned i widgettens størrelse.
+         * VIGTIGT:
+         * Vi ændrer ikke WebViewens layout her.
+         * Den har allerede været synlig og
+         * renderet i Activity-vinduet.
          */
-        web.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                width,
-                View.MeasureSpec.EXACTLY
-            ),
-            View.MeasureSpec.makeMeasureSpec(
-                height,
-                View.MeasureSpec.EXACTLY
-            )
-        )
-
-        web.layout(
-            0,
-            0,
-            width,
-            height
-        )
 
         val bitmap = Bitmap.createBitmap(
             width,
@@ -147,6 +169,23 @@ class WebsiteRenderActivity : Activity() {
         )
 
         val canvas = Canvas(bitmap)
+
+        /*
+         * Skalér den synlige WebView ned/op
+         * til widgettens faktiske størrelse.
+         */
+        val scaleX =
+            width.toFloat() /
+                web.width.coerceAtLeast(1).toFloat()
+
+        val scaleY =
+            height.toFloat() /
+                web.height.coerceAtLeast(1).toFloat()
+
+        canvas.scale(
+            scaleX,
+            scaleY
+        )
 
         web.draw(canvas)
 
@@ -168,18 +207,11 @@ class WebsiteRenderActivity : Activity() {
             )
         }
 
+        finished = true
+
+        web.stopLoading()
         web.destroy()
+
         finish()
-    }
-
-    override fun onDestroy() {
-        if (::web.isInitialized) {
-            try {
-                web.stopLoading()
-            } catch (_: Exception) {
-            }
-        }
-
-        super.onDestroy()
     }
 }
