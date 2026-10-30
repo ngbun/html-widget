@@ -10,13 +10,14 @@ import android.graphics.Canvas
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
 
 class HtmlRenderService : Service() {
 
-    private val main = Handler(Looper.getMainLooper())
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -26,22 +27,27 @@ class HtmlRenderService : Service() {
         startId: Int
     ): Int {
 
-        main.post { makeHtmlWidget() }
+        handler.post { renderHtml() }
 
         return START_NOT_STICKY
     }
 
-    private fun makeHtmlWidget() {
-
-        val web = WebView(this)
-
-        web.settings.javaScriptEnabled = true
-        web.setBackgroundColor(
-            android.graphics.Color.TRANSPARENT
-        )
+    private fun renderHtml() {
 
         val width = 1000
         val height = 500
+
+        val web = WebView(this)
+
+        web.setLayerType(
+            View.LAYER_TYPE_SOFTWARE,
+            null
+        )
+
+        web.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+        }
 
         web.webViewClient = object : WebViewClient() {
 
@@ -50,16 +56,16 @@ class HtmlRenderService : Service() {
                 url: String?
             ) {
 
-                main.postDelayed({
+                handler.postDelayed({
 
                     web.measure(
-                        android.view.View.MeasureSpec.makeMeasureSpec(
+                        View.MeasureSpec.makeMeasureSpec(
                             width,
-                            android.view.View.MeasureSpec.EXACTLY
+                            View.MeasureSpec.EXACTLY
                         ),
-                        android.view.View.MeasureSpec.makeMeasureSpec(
+                        View.MeasureSpec.makeMeasureSpec(
                             height,
-                            android.view.View.MeasureSpec.EXACTLY
+                            View.MeasureSpec.EXACTLY
                         )
                     )
 
@@ -70,105 +76,115 @@ class HtmlRenderService : Service() {
                         height
                     )
 
-                    val bitmap = Bitmap.createBitmap(
-                        width,
-                        height,
-                        Bitmap.Config.ARGB_8888
-                    )
+                    web.invalidate()
 
-                    val canvas = Canvas(bitmap)
+                    handler.postDelayed({
 
-                    web.draw(canvas)
-
-                    val manager =
-                        AppWidgetManager.getInstance(
-                            this@HtmlRenderService
-                        )
-
-                    val ids =
-                        manager.getAppWidgetIds(
-                            ComponentName(
-                                this@HtmlRenderService,
-                                HtmlWidgetProvider::class.java
+                        val bitmap =
+                            Bitmap.createBitmap(
+                                width,
+                                height,
+                                Bitmap.Config.ARGB_8888
                             )
-                        )
 
-                    ids.forEach { id ->
+                        val canvas = Canvas(bitmap)
 
-                        val remoteViews = RemoteViews(
-                            packageName,
-                            R.layout.widget_layout
-                        )
+                        web.draw(canvas)
 
-                        remoteViews.setImageViewBitmap(
-                            R.id.widget_image,
-                            bitmap
-                        )
+                        showBitmap(bitmap)
 
-                        manager.updateAppWidget(
-                            id,
-                            remoteViews
-                        )
-                    }
+                        web.destroy()
+                        stopSelf()
 
-                    web.destroy()
-                    stopSelf()
+                    }, 1000)
 
                 }, 1000)
             }
         }
 
-        val html = """
+        web.loadDataWithBaseURL(
+            "https://localhost/",
+            """
             <!DOCTYPE html>
             <html>
             <head>
                 <meta name="viewport"
-                      content="width=device-width, initial-scale=1">
+                    content="width=device-width, initial-scale=1.0">
+
                 <style>
                     html, body {
                         margin: 0;
+                        padding: 0;
                         width: 100%;
                         height: 100%;
-                        background: #171717;
-                        color: white;
-                        font-family: sans-serif;
+                        background: white;
                     }
 
-                    .box {
-                        box-sizing: border-box;
-                        width: 100%;
-                        height: 100%;
-                        padding: 55px;
+                    body {
+                        font-family: sans-serif;
+                        color: black;
+                    }
+
+                    .test {
+                        padding: 60px;
                     }
 
                     h1 {
-                        font-size: 64px;
-                        margin: 0 0 25px 0;
+                        font-size: 70px;
+                        margin: 0 0 30px 0;
                     }
 
                     p {
-                        font-size: 38px;
-                        margin: 0;
+                        font-size: 40px;
                     }
                 </style>
             </head>
 
             <body>
-                <div class="box">
+                <div class="test">
                     <h1>HTML VIRKER!</h1>
-                    <p>Denne tekst kommer fra en rigtig HTML-side.</p>
+                    <p>WebView kan nu tegne tekst.</p>
                 </div>
             </body>
             </html>
-        """.trimIndent()
-
-        web.loadDataWithBaseURL(
-            null,
-            html,
+            """.trimIndent(),
             "text/html",
             "UTF-8",
             null
         )
+    }
+
+    private fun showBitmap(bitmap: Bitmap) {
+
+        val manager =
+            AppWidgetManager.getInstance(this)
+
+        val ids =
+            manager.getAppWidgetIds(
+                ComponentName(
+                    this,
+                    HtmlWidgetProvider::class.java
+                )
+            )
+
+        ids.forEach { id ->
+
+            val views =
+                RemoteViews(
+                    packageName,
+                    R.layout.widget_layout
+                )
+
+            views.setImageViewBitmap(
+                R.id.widget_image,
+                bitmap
+            )
+
+            manager.updateAppWidget(
+                id,
+                views
+            )
+        }
     }
 
     companion object {
