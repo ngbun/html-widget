@@ -29,11 +29,11 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-        handler.post { startRender() }
+        handler.post { render() }
         return START_NOT_STICKY
     }
 
-    private fun startRender() {
+    private fun render() {
 
         val prefs =
             getSharedPreferences("settings", MODE_PRIVATE)
@@ -59,166 +59,6 @@ class HtmlRenderService : Service() {
             stopSelf()
             return
         }
-
-        /*
-         * TRIN 1
-         * Måle-WebView.
-         */
-        val measureWeb = WebView(this)
-
-        measureWeb.setLayerType(
-            View.LAYER_TYPE_SOFTWARE,
-            null
-        )
-
-        measureWeb.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            loadsImagesAutomatically = true
-            useWideViewPort = true
-            loadWithOverviewMode = false
-        }
-
-        /*
-         * Start med en almindelig viewport.
-         * HTML'en får selv lov til at bygge tabellen.
-         */
-        val measureWidth = 1000
-        val measureHeight = 1000
-
-        measureWeb.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                measureWidth,
-                View.MeasureSpec.EXACTLY
-            ),
-            View.MeasureSpec.makeMeasureSpec(
-                measureHeight,
-                View.MeasureSpec.EXACTLY
-            )
-        )
-
-        measureWeb.layout(
-            0,
-            0,
-            measureWidth,
-            measureHeight
-        )
-
-        measureWeb.webViewClient =
-            object : WebViewClient() {
-
-                override fun onPageFinished(
-                    view: WebView?,
-                    url: String?
-                ) {
-
-                    /*
-                     * Vent på elpriserne og tabellen.
-                     */
-                    handler.postDelayed({
-
-                        /*
-                         * Find det bredeste element.
-                         *
-                         * scrollWidth er vigtigt for tabeller
-                         * og andre elementer, der går ud over
-                         * den synlige viewport.
-                         */
-                        measureWeb.evaluateJavascript(
-                            """
-                            (function() {
-
-                                var all =
-                                    document.querySelectorAll('*');
-
-                                var widest = 0;
-
-                                for (
-                                    var i = 0;
-                                    i < all.length;
-                                    i++
-                                ) {
-
-                                    var el = all[i];
-
-                                    var style =
-                                        window.getComputedStyle(el);
-
-                                    if (
-                                        style.display === 'none' ||
-                                        style.visibility === 'hidden'
-                                    ) {
-                                        continue;
-                                    }
-
-                                    widest = Math.max(
-                                        widest,
-                                        el.scrollWidth || 0,
-                                        el.offsetWidth || 0
-                                    );
-                                }
-
-                                widest = Math.max(
-                                    widest,
-                                    document.body.scrollWidth,
-                                    document.documentElement.scrollWidth
-                                );
-
-                                return Math.ceil(widest);
-
-                            })();
-                            """.trimIndent()
-                        ) { result ->
-
-                            val naturalWidth =
-                                result
-                                    .replace("\"", "")
-                                    .trim()
-                                    .toIntOrNull()
-                                    ?: 1000
-
-                            /*
-                             * Lidt ekstra plads til sidste
-                             * kolonne og afrunding.
-                             */
-                            val renderWidth =
-                                (naturalWidth + 40)
-                                    .coerceIn(
-                                        400,
-                                        6000
-                                    )
-
-                            measureWeb.destroy()
-
-                            /*
-                             * TRIN 2
-                             * Ny WebView i den målte bredde.
-                             */
-                            renderFullHtml(
-                                html,
-                                localUri,
-                                renderWidth
-                            )
-                        }
-
-                    }, 4000)
-                }
-            }
-
-        measureWeb.loadDataWithBaseURL(
-            localUri,
-            html,
-            "text/html",
-            "UTF-8",
-            null
-        )
-    }
-
-    private fun renderFullHtml(
-        html: String,
-        localUri: String,
-        renderWidth: Int
-    ) {
 
         val manager =
             AppWidgetManager.getInstance(this)
@@ -248,9 +88,7 @@ class HtmlRenderService : Service() {
                     AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
                     300
                 ) * density
-            )
-                .roundToInt()
-                .coerceAtLeast(1)
+            ).roundToInt()
 
         val widgetHeight =
             (
@@ -258,9 +96,7 @@ class HtmlRenderService : Service() {
                     AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
                     180
                 ) * density
-            )
-                .roundToInt()
-                .coerceAtLeast(1)
+            ).roundToInt()
 
         val web = WebView(this)
 
@@ -278,18 +114,16 @@ class HtmlRenderService : Service() {
         }
 
         /*
-         * Stor nok højde til at siden kan bygges.
-         * Den rigtige højde måles bagefter.
+         * Første størrelse er kun arbejdsområdet.
+         * Den endelige størrelse findes fra HTML'en.
          */
-        val workHeight = 1800
-
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
-                renderWidth,
+                1000,
                 View.MeasureSpec.EXACTLY
             ),
             View.MeasureSpec.makeMeasureSpec(
-                workHeight,
+                1000,
                 View.MeasureSpec.EXACTLY
             )
         )
@@ -297,8 +131,8 @@ class HtmlRenderService : Service() {
         web.layout(
             0,
             0,
-            renderWidth,
-            workHeight
+            1000,
+            1000
         )
 
         web.webViewClient =
@@ -309,47 +143,19 @@ class HtmlRenderService : Service() {
                     url: String?
                 ) {
 
+                    /*
+                     * Vent på at priserne er hentet
+                     * og alle 24 kolonner er oprettet.
+                     */
                     handler.postDelayed({
 
-                        /*
-                         * Nu måler vi kun højden.
-                         * Bredden ændrer vi ikke længere.
-                         */
-                        web.evaluateJavascript(
-                            """
-                            (function() {
-
-                                return Math.ceil(
-                                    Math.max(
-                                        document.body.scrollHeight,
-                                        document.body.offsetHeight,
-                                        document.documentElement.scrollHeight,
-                                        document.documentElement.offsetHeight
-                                    )
-                                );
-
-                            })();
-                            """.trimIndent()
-                        ) { result ->
-
-                            val contentHeight =
-                                result
-                                    .replace("\"", "")
-                                    .trim()
-                                    .toIntOrNull()
-                                    ?.coerceIn(200, workHeight)
-                                    ?: workHeight
-
-                            makeBitmap(
-                                web,
-                                manager,
-                                ids,
-                                renderWidth,
-                                contentHeight,
-                                widgetWidth,
-                                widgetHeight
-                            )
-                        }
+                        preparePage(
+                            web,
+                            manager,
+                            ids,
+                            widgetWidth,
+                            widgetHeight
+                        )
 
                     }, 4000)
                 }
@@ -362,6 +168,144 @@ class HtmlRenderService : Service() {
             "UTF-8",
             null
         )
+    }
+
+    private fun preparePage(
+        web: WebView,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        widgetWidth: Int,
+        widgetHeight: Int
+    ) {
+
+        web.evaluateJavascript(
+            """
+            (function() {
+
+                /*
+                 * SPECIAL CASE:
+                 * Hvis siden har #grid og .wrap,
+                 * bruger vi selve tabellens fulde bredde.
+                 */
+                var grid =
+                    document.querySelector('#grid');
+
+                var wrap =
+                    document.querySelector('.wrap');
+
+                if (grid && wrap) {
+
+                    var gridWidth =
+                        Math.ceil(
+                            Math.max(
+                                grid.scrollWidth,
+                                grid.offsetWidth
+                            )
+                        );
+
+                    /*
+                     * Fjern den vandrette scroll-container.
+                     * Nu bliver ALLE 24 timer en del af
+                     * selve siden.
+                     */
+                    wrap.style.maxWidth = 'none';
+                    wrap.style.width =
+                        gridWidth + 'px';
+
+                    wrap.style.overflow = 'visible';
+
+                    document.body.style.width =
+                        (gridWidth + 24) + 'px';
+
+                    document.documentElement.style.width =
+                        (gridWidth + 24) + 'px';
+                }
+
+                /*
+                 * GENEREL FALLBACK:
+                 * Virker også med andre HTML-filer.
+                 */
+                var width =
+                    Math.ceil(
+                        Math.max(
+                            document.body.scrollWidth,
+                            document.documentElement.scrollWidth,
+                            grid ? grid.scrollWidth : 0
+                        )
+                    );
+
+                var height =
+                    Math.ceil(
+                        Math.max(
+                            document.body.scrollHeight,
+                            document.documentElement.scrollHeight
+                        )
+                    );
+
+                return width + "," + height;
+
+            })();
+            """.trimIndent()
+        ) { result ->
+
+            val parts =
+                result
+                    .replace("\"", "")
+                    .trim()
+                    .split(",")
+
+            val width =
+                parts
+                    .getOrNull(0)
+                    ?.toIntOrNull()
+                    ?.coerceIn(200, 5000)
+                    ?: 1000
+
+            val height =
+                parts
+                    .getOrNull(1)
+                    ?.toIntOrNull()
+                    ?.coerceIn(100, 2000)
+                    ?: 1000
+
+            /*
+             * NU ændrer vi WebView'en til den fundne
+             * fulde størrelse.
+             */
+            web.measure(
+                View.MeasureSpec.makeMeasureSpec(
+                    width,
+                    View.MeasureSpec.EXACTLY
+                ),
+                View.MeasureSpec.makeMeasureSpec(
+                    height,
+                    View.MeasureSpec.EXACTLY
+                )
+            )
+
+            web.layout(
+                0,
+                0,
+                width,
+                height
+            )
+
+            web.invalidate()
+
+            handler.postDelayed({
+
+                makeBitmap(
+                    web,
+                    manager,
+                    ids,
+                    width,
+                    height,
+                    widgetWidth,
+                    widgetHeight
+                )
+
+            }, 1200)
+        }
     }
 
     private fun makeBitmap(
@@ -387,8 +331,8 @@ class HtmlRenderService : Service() {
         web.draw(canvas)
 
         /*
-         * Én proportional skala.
-         * Intet bliver strukket eller beskåret.
+         * Hele siden skal være synlig.
+         * Samme skalering bruges i begge retninger.
          */
         val scale =
             min(
@@ -397,7 +341,7 @@ class HtmlRenderService : Service() {
 
                 widgetHeight.toFloat() /
                     contentHeight.toFloat()
-            ).coerceAtMost(1f)
+            )
 
         val finalWidth =
             (contentWidth * scale)
