@@ -17,6 +17,11 @@
             </intent-filter>
         </activity>
 
+<activity
+    android:name=".WebsiteRenderActivity"
+    android:exported="false"
+    android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        
         <service
             android:name=".HtmlRenderService"
             android:exported="false" />
