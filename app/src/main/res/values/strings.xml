@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">HTML Widget</string>
+    <string name="widget_description">Viser en HTML-fil eller hjemmeside på startskærmen</string>
+</resources>
