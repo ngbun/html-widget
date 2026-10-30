@@ -21,6 +21,7 @@ class SetupActivity : Activity() {
     private var localUri: Uri? = null
     private lateinit var url: EditText
     private lateinit var adBlock: CheckBox
+    private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
