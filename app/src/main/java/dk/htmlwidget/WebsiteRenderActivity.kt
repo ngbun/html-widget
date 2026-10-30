@@ -45,7 +45,7 @@ if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
             finish()
             return
         }
-
+val manager = AppWidgetManager.getInstance(this)
         val ids = intArrayOf(appWidgetId)
 
         if (ids.isEmpty()) {
