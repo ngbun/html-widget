@@ -15,7 +15,6 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
@@ -29,7 +28,9 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+
         handler.post { renderHtml() }
+
         return START_NOT_STICKY
     }
 
@@ -47,10 +48,12 @@ class HtmlRenderService : Service() {
         }
 
         val html = try {
+
             contentResolver
                 .openInputStream(Uri.parse(localUri))
                 ?.bufferedReader()
                 ?.use { it.readText() }
+
         } catch (e: Exception) {
             null
         }
@@ -82,13 +85,18 @@ class HtmlRenderService : Service() {
         val density =
             resources.displayMetrics.density
 
+        /*
+         * Den RIGTIGE størrelse på widgetten.
+         */
         val widgetWidth =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
                     300
                 ) * density
-            ).roundToInt()
+            )
+                .roundToInt()
+                .coerceAtLeast(300)
 
         val widgetHeight =
             (
@@ -96,39 +104,46 @@ class HtmlRenderService : Service() {
                     AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
                     180
                 ) * density
-            ).roundToInt()
-
-        /*
-         * Stor arbejdsflade.
-         * Dette er IKKE HTML'ens faste størrelse.
-         * Den bruges kun til at give brede sider plads
-         * mens vi måler deres rigtige indhold.
-         */
-        val workWidth = 5000
-        val workHeight = 2000
+            )
+                .roundToInt()
+                .coerceAtLeast(200)
 
         val web = WebView(this)
 
+        /*
+         * Denne beholder vi.
+         * Uden software-rendering fik vi tidligere
+         * kun en tom/sort widget.
+         */
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
             null
         )
 
         web.settings.apply {
+
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
+
             useWideViewPort = true
             loadWithOverviewMode = false
+
+            builtInZoomControls = false
+            displayZoomControls = false
         }
 
+        /*
+         * WebView'en ændres IKKE senere.
+         * Den får widgettens størrelse fra starten.
+         */
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
-                workWidth,
+                widgetWidth,
                 View.MeasureSpec.EXACTLY
             ),
             View.MeasureSpec.makeMeasureSpec(
-                workHeight,
+                widgetHeight,
                 View.MeasureSpec.EXACTLY
             )
         )
@@ -136,8 +151,8 @@ class HtmlRenderService : Service() {
         web.layout(
             0,
             0,
-            workWidth,
-            workHeight
+            widgetWidth,
+            widgetHeight
         )
 
         web.webViewClient =
@@ -149,136 +164,13 @@ class HtmlRenderService : Service() {
                 ) {
 
                     /*
-                     * Vent på priser og JavaScript.
+                     * Din elpris-HTML henter priser med
+                     * JavaScript, så vi giver den tid
+                     * til at bygge hele tabellen først.
                      */
                     handler.postDelayed({
 
-                        /*
-                         * Find den yderste kant af ALLE
-                         * synlige elementer.
-                         *
-                         * Vi ændrer ikke viewporten bagefter.
-                         */
-                        web.evaluateJavascript(
-                            """
-                            (function() {
-
-                                var elements =
-                                    document.querySelectorAll('*');
-
-                                var maxRight = 0;
-                                var maxBottom = 0;
-
-                                for (
-                                    var i = 0;
-                                    i < elements.length;
-                                    i++
-                                ) {
-
-                                    var el = elements[i];
-
-                                    var style =
-                                        window.getComputedStyle(el);
-
-                                    if (
-                                        style.display === 'none' ||
-                                        style.visibility === 'hidden'
-                                    ) {
-                                        continue;
-                                    }
-
-                                    var r =
-                                        el.getBoundingClientRect();
-
-                                    if (
-                                        r.width > 0 &&
-                                        r.height > 0
-                                    ) {
-                                        maxRight =
-                                            Math.max(
-                                                maxRight,
-                                                r.right
-                                            );
-
-                                        maxBottom =
-                                            Math.max(
-                                                maxBottom,
-                                                r.bottom
-                                            );
-                                    }
-                                }
-
-                                maxRight =
-                                    Math.max(
-                                        maxRight,
-                                        document.body.scrollWidth,
-                                        document.documentElement.scrollWidth
-                                    );
-
-                                maxBottom =
-                                    Math.max(
-                                        maxBottom,
-                                        document.body.scrollHeight,
-                                        document.documentElement.scrollHeight
-                                    );
-
-                                return (
-                                    Math.ceil(maxRight) +
-                                    "," +
-                                    Math.ceil(maxBottom)
-                                );
-                            })();
-                            """.trimIndent()
-                        ) { result ->
-
-                            val clean =
-                                result
-                                    .replace("\"", "")
-                                    .trim()
-
-                            val parts =
-                                clean.split(",")
-
-                            var contentWidth =
-                                parts
-                                    .getOrNull(0)
-                                    ?.toIntOrNull()
-                                    ?: workWidth
-
-                            var contentHeight =
-                                parts
-                                    .getOrNull(1)
-                                    ?.toIntOrNull()
-                                    ?: workHeight
-
-                            /*
-                             * Lille sikkerhedsmargin.
-                             */
-                            contentWidth += 20
-                            contentHeight += 20
-
-                            contentWidth =
-                                contentWidth.coerceIn(
-                                    1,
-                                    workWidth
-                                )
-
-                            contentHeight =
-                                contentHeight.coerceIn(
-                                    1,
-                                    workHeight
-                                )
-
-                            makeBitmap(
-                                web,
-                                manager,
-                                ids,
-                                contentWidth,
-                                contentHeight,
-                                widgetWidth,
-                                widgetHeight
-                            )
-                        }
+                        fitHtml(web)
 
                     }, 4000)
                 }
@@ -293,72 +185,153 @@ class HtmlRenderService : Service() {
         )
     }
 
-    private fun makeBitmap(
-        web: WebView,
-        manager: AppWidgetManager,
-        ids: IntArray,
-        contentWidth: Int,
-        contentHeight: Int,
-        widgetWidth: Int,
-        widgetHeight: Int
+    private fun fitHtml(
+        web: WebView
     ) {
 
         /*
-         * WebView'en ændres IKKE i størrelse her.
+         * JavaScript måler hele dokumentets naturlige
+         * bredde og højde.
          *
-         * Vi tegner kun det område, som JavaScript
-         * har fundet indeholder HTML'en.
+         * Derefter beregnes én zoom-faktor, så både
+         * bredde OG højde kan være i viewporten.
+         *
+         * Smalle HTML-sider bliver ikke gjort mindre
+         * end nødvendigt.
          */
-        val fullBitmap =
-            Bitmap.createBitmap(
-                contentWidth,
-                contentHeight,
-                Bitmap.Config.ARGB_8888
-            )
+        web.evaluateJavascript(
+            """
+            (function() {
 
-        val canvas =
-            Canvas(fullBitmap)
+                document.body.style.zoom = '1';
 
-        web.draw(canvas)
+                var doc =
+                    document.documentElement;
+
+                var body =
+                    document.body;
+
+                var viewportWidth =
+                    doc.clientWidth;
+
+                var viewportHeight =
+                    doc.clientHeight;
+
+                var contentWidth =
+                    Math.max(
+                        body.scrollWidth,
+                        body.offsetWidth,
+                        doc.scrollWidth,
+                        doc.offsetWidth
+                    );
+
+                var contentHeight =
+                    Math.max(
+                        body.scrollHeight,
+                        body.offsetHeight,
+                        doc.scrollHeight,
+                        doc.offsetHeight
+                    );
+
+                var scaleX =
+                    viewportWidth / contentWidth;
+
+                var scaleY =
+                    viewportHeight / contentHeight;
+
+                var scale =
+                    Math.min(
+                        1,
+                        scaleX,
+                        scaleY
+                    );
+
+                /*
+                 * En lille margin så sidste kolonne
+                 * ikke rammer helt ud i kanten.
+                 */
+                scale = scale * 0.97;
+
+                document.body.style.transformOrigin =
+                    'top left';
+
+                document.body.style.zoom =
+                    scale.toString();
+
+                document.documentElement.style.overflow =
+                    'hidden';
+
+                document.body.style.overflow =
+                    'visible';
+
+                return scale.toString();
+
+            })();
+            """.trimIndent()
+        ) {
+
+            /*
+             * Giv Chromium tid til at tegne siden
+             * igen efter zoom.
+             */
+            handler.postDelayed({
+
+                makeBitmap(web)
+
+            }, 1500)
+        }
+    }
+
+    private fun makeBitmap(
+        web: WebView
+    ) {
 
         /*
-         * Hele HTML-indholdet skal være indenfor
-         * både widgettens bredde OG højde.
+         * Tving endnu en draw/layout-cyklus.
          */
-        val scaleX =
-            widgetWidth.toFloat() /
-                contentWidth.toFloat()
+        web.invalidate()
 
-        val scaleY =
-            widgetHeight.toFloat() /
-                contentHeight.toFloat()
+        handler.postDelayed({
 
-        /*
-         * Vi forstørrer ikke små HTML-sider over
-         * deres oprindelige størrelse.
-         */
-        val scale =
-            min(
-                1f,
-                min(scaleX, scaleY)
-            )
+            val width =
+                web.width.coerceAtLeast(1)
 
-        val finalWidth =
-            (contentWidth * scale)
-                .roundToInt()
-                .coerceAtLeast(1)
+            val height =
+                web.height.coerceAtLeast(1)
 
-        val finalHeight =
-            (contentHeight * scale)
-                .roundToInt()
-                .coerceAtLeast(1)
+            val bitmap =
+                Bitmap.createBitmap(
+                    width,
+                    height,
+                    Bitmap.Config.ARGB_8888
+                )
 
-        val fittedBitmap =
-            Bitmap.createScaledBitmap(
-                fullBitmap,
-                finalWidth,
-                finalHeight,
-                true
+            val canvas =
+                Canvas(bitmap)
+
+            web.draw(canvas)
+
+            showBitmap(bitmap)
+
+            web.destroy()
+            stopSelf()
+
+        }, 500)
+    }
+
+    private fun showBitmap(
+        bitmap: Bitmap
+    ) {
+
+        val manager =
+            AppWidgetManager.getInstance(this)
+
+        val ids =
+            manager.getAppWidgetIds(
+                ComponentName(
+                    this,
+                    HtmlWidgetProvider::class.java
+                )
             )
 
         ids.forEach { id ->
@@ -371,7 +344,7 @@ class HtmlRenderService : Service() {
 
             views.setImageViewBitmap(
                 R.id.widget_image,
-                fittedBitmap
+                bitmap
             )
 
             manager.updateAppWidget(
@@ -379,13 +352,6 @@ class HtmlRenderService : Service() {
                 views
             )
         }
-
-        if (fittedBitmap !== fullBitmap) {
-            fullBitmap.recycle()
-        }
-
-        web.destroy()
-        stopSelf()
     }
 
     companion object {
