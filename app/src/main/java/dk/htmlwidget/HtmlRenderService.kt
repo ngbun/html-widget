@@ -44,8 +44,16 @@ handler.post {
         val prefs =
             getSharedPreferences("settings", MODE_PRIVATE)
 
-        val localUri =
-            prefs.getString("localUri", null)
+        if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+    stopSelf()
+    return
+}
+
+val localUri =
+    prefs.getString(
+        "localUri_$appWidgetId",
+        null
+    )
 
         /*
          * Denne service håndterer KUN lokal HTML.
