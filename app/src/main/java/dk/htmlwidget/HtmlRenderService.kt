@@ -28,11 +28,18 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-        handler.post { render() }
+        val appWidgetId = intent?.getIntExtra(
+    AppWidgetManager.EXTRA_APPWIDGET_ID,
+    AppWidgetManager.INVALID_APPWIDGET_ID
+) ?: AppWidgetManager.INVALID_APPWIDGET_ID
+
+handler.post {
+    render(appWidgetId)
+}
         return START_NOT_STICKY
     }
 
-    private fun render() {
+    private fun render(appWidgetId: Int) {
 
         val prefs =
             getSharedPreferences("settings", MODE_PRIVATE)
