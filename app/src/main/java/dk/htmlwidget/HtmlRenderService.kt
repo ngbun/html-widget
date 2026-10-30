@@ -15,7 +15,6 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
-import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
@@ -98,6 +97,15 @@ class HtmlRenderService : Service() {
                 ) * density
             ).roundToInt()
 
+        /*
+         * Bred viewport til hele 24-timers tabellen.
+         *
+         * WebView får derefter lov til selv at zoome
+         * hele siden ned.
+         */
+        val renderWidth = 3600
+        val renderHeight = 1100
+
         val web = WebView(this)
 
         web.setLayerType(
@@ -109,9 +117,41 @@ class HtmlRenderService : Service() {
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
+
             useWideViewPort = true
-            loadWithOverviewMode = false
+            loadWithOverviewMode = true
+
+            builtInZoomControls = false
+            displayZoomControls = false
         }
+
+        /*
+         * Gør selve HTML-dokumentet bredt.
+         * Vi ændrer ikke din HTML-fil permanent.
+         */
+        val fittedHtml =
+            html.replace(
+                "<head>",
+                """
+                <head>
+                <style>
+                    html {
+                        width: 2400px !important;
+                    }
+
+                    body {
+                        width: 2400px !important;
+                        max-width: none !important;
+                        overflow: visible !important;
+                    }
+
+                    table {
+                        max-width: none !important;
+                    }
+                </style>
+                """.trimIndent(),
+                ignoreCase = true
+            )
 
         web.webViewClient =
             object : WebViewClient() {
@@ -122,234 +162,105 @@ class HtmlRenderService : Service() {
                 ) {
 
                     /*
-                     * Først giver vi siden tid til at hente
-                     * priser og bygge tabellen.
+                     * Tid til at hente alle elpriserne.
                      */
                     handler.postDelayed({
 
-                        web.evaluateJavascript(
-                            """
-                            (function() {
-                                var body = document.body;
-                                var html = document.documentElement;
-
-                                var w = Math.max(
-                                    body.scrollWidth,
-                                    body.offsetWidth,
-                                    html.scrollWidth,
-                                    html.offsetWidth,
-                                    html.clientWidth
-                                );
-
-                                var h = Math.max(
-                                    body.scrollHeight,
-                                    body.offsetHeight,
-                                    html.scrollHeight,
-                                    html.offsetHeight,
-                                    html.clientHeight
-                                );
-
-                                return w + "," + h;
-                            })();
-                            """.trimIndent()
-                        ) { result ->
-
-                            /*
-                             * Resultatet kommer eksempelvis som:
-                             * "2450,720"
-                             */
-                            val clean =
-                                result
-                                    .replace("\"", "")
-                                    .trim()
-
-                            val parts =
-                                clean.split(",")
-
-                            var contentWidth =
-                                parts
-                                    .getOrNull(0)
-                                    ?.toIntOrNull()
-                                    ?: 1600
-
-                            var contentHeight =
-                                parts
-                                    .getOrNull(1)
-                                    ?.toIntOrNull()
-                                    ?: 900
-
-                            /*
-                             * Lidt sikkerhedsmargin, så den
-                             * sidste time ikke bliver klippet.
-                             */
-                            contentWidth += 40
-                            contentHeight += 20
-
-                            /*
-                             * Beskyt telefonen mod ekstremt
-                             * store bitmaps.
-                             */
-                            contentWidth =
-                                contentWidth.coerceIn(
-                                    600,
-                                    5000
-                                )
-
-                            contentHeight =
-                                contentHeight.coerceIn(
-                                    300,
-                                    2000
-                                )
-
-                            renderFullPage(
-                                web,
-                                manager,
-                                ids,
-                                contentWidth,
-                                contentHeight,
-                                widgetWidth,
-                                widgetHeight
+                        web.measure(
+                            View.MeasureSpec.makeMeasureSpec(
+                                renderWidth,
+                                View.MeasureSpec.EXACTLY
+                            ),
+                            View.MeasureSpec.makeMeasureSpec(
+                                renderHeight,
+                                View.MeasureSpec.EXACTLY
                             )
-                        }
+                        )
+
+                        web.layout(
+                            0,
+                            0,
+                            renderWidth,
+                            renderHeight
+                        )
+
+                        web.invalidate()
+
+                        handler.postDelayed({
+
+                            val fullBitmap =
+                                Bitmap.createBitmap(
+                                    renderWidth,
+                                    renderHeight,
+                                    Bitmap.Config.ARGB_8888
+                                )
+
+                            val canvas =
+                                Canvas(fullBitmap)
+
+                            web.draw(canvas)
+
+                            /*
+                             * Nu skalerer vi hele det færdige
+                             * billede til widgettens bredde.
+                             */
+                            val ratio =
+                                widgetWidth.toFloat() /
+                                    renderWidth.toFloat()
+
+                            val finalHeight =
+                                (renderHeight * ratio)
+                                    .roundToInt()
+                                    .coerceAtMost(widgetHeight)
+                                    .coerceAtLeast(1)
+
+                            val fittedBitmap =
+                                Bitmap.createScaledBitmap(
+                                    fullBitmap,
+                                    widgetWidth,
+                                    finalHeight,
+                                    true
+                                )
+
+                            ids.forEach { id ->
+
+                                val views =
+                                    RemoteViews(
+                                        packageName,
+                                        R.layout.widget_layout
+                                    )
+
+                                views.setImageViewBitmap(
+                                    R.id.widget_image,
+                                    fittedBitmap
+                                )
+
+                                manager.updateAppWidget(
+                                    id,
+                                    views
+                                )
+                            }
+
+                            if (fittedBitmap !== fullBitmap) {
+                                fullBitmap.recycle()
+                            }
+
+                            web.destroy()
+                            stopSelf()
+
+                        }, 1500)
 
                     }, 3500)
                 }
             }
 
-        /*
-         * Start bredt nok til at HTML-tabellen kan
-         * bygge alle 24 timer.
-         */
-        web.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                4000,
-                View.MeasureSpec.EXACTLY
-            ),
-            View.MeasureSpec.makeMeasureSpec(
-                1000,
-                View.MeasureSpec.EXACTLY
-            )
-        )
-
-        web.layout(
-            0,
-            0,
-            4000,
-            1000
-        )
-
         web.loadDataWithBaseURL(
             localUri,
-            html,
+            fittedHtml,
             "text/html",
             "UTF-8",
             null
         )
-    }
-
-    private fun renderFullPage(
-        web: WebView,
-        manager: AppWidgetManager,
-        ids: IntArray,
-        contentWidth: Int,
-        contentHeight: Int,
-        widgetWidth: Int,
-        widgetHeight: Int
-    ) {
-
-        web.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                contentWidth,
-                View.MeasureSpec.EXACTLY
-            ),
-            View.MeasureSpec.makeMeasureSpec(
-                contentHeight,
-                View.MeasureSpec.EXACTLY
-            )
-        )
-
-        web.layout(
-            0,
-            0,
-            contentWidth,
-            contentHeight
-        )
-
-        web.invalidate()
-
-        handler.postDelayed({
-
-            val fullBitmap =
-                Bitmap.createBitmap(
-                    contentWidth,
-                    contentHeight,
-                    Bitmap.Config.ARGB_8888
-                )
-
-            val canvas =
-                Canvas(fullBitmap)
-
-            web.draw(canvas)
-
-            /*
-             * Fit HELE billedet ind i widgetten.
-             */
-            val scaleX =
-                widgetWidth.toFloat() /
-                    contentWidth.toFloat()
-
-            val scaleY =
-                widgetHeight.toFloat() /
-                    contentHeight.toFloat()
-
-            val scale =
-                min(scaleX, scaleY)
-
-            val finalWidth =
-                (contentWidth * scale)
-                    .roundToInt()
-                    .coerceAtLeast(1)
-
-            val finalHeight =
-                (contentHeight * scale)
-                    .roundToInt()
-                    .coerceAtLeast(1)
-
-            val fittedBitmap =
-                Bitmap.createScaledBitmap(
-                    fullBitmap,
-                    finalWidth,
-                    finalHeight,
-                    true
-                )
-
-            ids.forEach { id ->
-
-                val views =
-                    RemoteViews(
-                        packageName,
-                        R.layout.widget_layout
-                    )
-
-                views.setImageViewBitmap(
-                    R.id.widget_image,
-                    fittedBitmap
-                )
-
-                manager.updateAppWidget(
-                    id,
-                    views
-                )
-            }
-
-            if (fittedBitmap !== fullBitmap) {
-                fullBitmap.recycle()
-            }
-
-            web.destroy()
-            stopSelf()
-
-        }, 1500)
     }
 
     companion object {
