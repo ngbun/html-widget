@@ -15,6 +15,7 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
+import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
 
@@ -62,13 +63,66 @@ class HtmlRenderService : Service() {
             return
         }
 
-        val width = 1200
-        val height = 700
+        val manager =
+            AppWidgetManager.getInstance(this)
+
+        val ids =
+            manager.getAppWidgetIds(
+                ComponentName(
+                    this,
+                    HtmlWidgetProvider::class.java
+                )
+            )
+
+        if (ids.isEmpty()) {
+            stopSelf()
+            return
+        }
+
+        /*
+         * Find widgettens aktuelle størrelse.
+         *
+         * Android giver størrelsen i dp.
+         * Vi omregner den til pixels.
+         */
+        val options =
+            manager.getAppWidgetOptions(ids[0])
+
+        val density =
+            resources.displayMetrics.density
+
+        val widthDp =
+            options.getInt(
+                AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+                300
+            )
+
+        val heightDp =
+            options.getInt(
+                AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
+                180
+            )
+
+        /*
+         * Render i ca. 2x opløsning.
+         * Det giver skarpere tekst i widgetten.
+         */
+        val scale = 2f
+
+        val width =
+            (widthDp * density * scale)
+                .roundToInt()
+                .coerceIn(400, 1800)
+
+        val height =
+            (heightDp * density * scale)
+                .roundToInt()
+                .coerceIn(250, 1400)
 
         val web = WebView(this)
 
-        // VIGTIGT:
-        // Dette var løsningen på den tomme WebView.
+        // Denne skal beholdes.
+        // Det var den, der fik HTML-renderingen til at virke.
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
             null
@@ -78,6 +132,7 @@ class HtmlRenderService : Service() {
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
+
             useWideViewPort = true
             loadWithOverviewMode = true
         }
@@ -126,7 +181,11 @@ class HtmlRenderService : Service() {
 
                             web.draw(canvas)
 
-                            showBitmap(bitmap)
+                            showBitmap(
+                                manager,
+                                ids,
+                                bitmap
+                            )
 
                             web.destroy()
                             stopSelf()
@@ -147,19 +206,10 @@ class HtmlRenderService : Service() {
     }
 
     private fun showBitmap(
+        manager: AppWidgetManager,
+        ids: IntArray,
         bitmap: Bitmap
     ) {
-
-        val manager =
-            AppWidgetManager.getInstance(this)
-
-        val ids =
-            manager.getAppWidgetIds(
-                ComponentName(
-                    this,
-                    HtmlWidgetProvider::class.java
-                )
-            )
 
         ids.forEach { id ->
 
