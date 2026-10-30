@@ -15,6 +15,7 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
@@ -30,7 +31,6 @@ class HtmlRenderService : Service() {
     ): Int {
 
         handler.post { renderHtml() }
-
         return START_NOT_STICKY
     }
 
@@ -80,10 +80,7 @@ class HtmlRenderService : Service() {
         }
 
         /*
-         * Find widgettens aktuelle størrelse.
-         *
-         * Android giver størrelsen i dp.
-         * Vi omregner den til pixels.
+         * Størrelsen på den valgte Android-widget.
          */
         val options =
             manager.getAppWidgetOptions(ids[0])
@@ -91,38 +88,34 @@ class HtmlRenderService : Service() {
         val density =
             resources.displayMetrics.density
 
-        val widthDp =
-            options.getInt(
-                AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
-                300
-            )
+        val widgetWidth =
+            (
+                options.getInt(
+                    AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+                    300
+                ) * density
+            ).roundToInt()
 
-        val heightDp =
-            options.getInt(
-                AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
-                180
-            )
+        val widgetHeight =
+            (
+                options.getInt(
+                    AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
+                    180
+                ) * density
+            ).roundToInt()
 
         /*
-         * Render i ca. 2x opløsning.
-         * Det giver skarpere tekst i widgetten.
+         * HTML'en renderes først stort.
+         *
+         * Det er vigtigt for den vandrette elpristabel,
+         * så hele tabellen kan eksistere før den
+         * skaleres ned.
          */
-        val scale = 2f
-
-        val width =
-            (widthDp * density * scale)
-                .roundToInt()
-                .coerceIn(400, 1800)
-
-        val height =
-            (heightDp * density * scale)
-                .roundToInt()
-                .coerceIn(250, 1400)
+        val htmlWidth = 1600
+        val htmlHeight = 900
 
         val web = WebView(this)
 
-        // Denne skal beholdes.
-        // Det var den, der fik HTML-renderingen til at virke.
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
             null
@@ -134,7 +127,7 @@ class HtmlRenderService : Service() {
             loadsImagesAutomatically = true
 
             useWideViewPort = true
-            loadWithOverviewMode = true
+            loadWithOverviewMode = false
         }
 
         web.webViewClient =
@@ -149,11 +142,11 @@ class HtmlRenderService : Service() {
 
                         web.measure(
                             View.MeasureSpec.makeMeasureSpec(
-                                width,
+                                htmlWidth,
                                 View.MeasureSpec.EXACTLY
                             ),
                             View.MeasureSpec.makeMeasureSpec(
-                                height,
+                                htmlHeight,
                                 View.MeasureSpec.EXACTLY
                             )
                         )
@@ -161,38 +154,80 @@ class HtmlRenderService : Service() {
                         web.layout(
                             0,
                             0,
-                            width,
-                            height
+                            htmlWidth,
+                            htmlHeight
                         )
 
                         web.invalidate()
 
                         handler.postDelayed({
 
-                            val bitmap =
+                            val fullBitmap =
                                 Bitmap.createBitmap(
-                                    width,
-                                    height,
+                                    htmlWidth,
+                                    htmlHeight,
                                     Bitmap.Config.ARGB_8888
                                 )
 
                             val canvas =
-                                Canvas(bitmap)
+                                Canvas(fullBitmap)
 
                             web.draw(canvas)
+
+                            /*
+                             * Beregn hvor meget HELE HTML'en
+                             * skal skaleres ned.
+                             *
+                             * Samme faktor bruges på bredde
+                             * og højde, så intet strækkes.
+                             */
+                            val scaleX =
+                                widgetWidth.toFloat() /
+                                    htmlWidth.toFloat()
+
+                            val scaleY =
+                                widgetHeight.toFloat() /
+                                    htmlHeight.toFloat()
+
+                            val scale =
+                                min(scaleX, scaleY)
+
+                            val finalWidth =
+                                (htmlWidth * scale)
+                                    .roundToInt()
+                                    .coerceAtLeast(1)
+
+                            val finalHeight =
+                                (htmlHeight * scale)
+                                    .roundToInt()
+                                    .coerceAtLeast(1)
+
+                            val fittedBitmap =
+                                Bitmap.createScaledBitmap(
+                                    fullBitmap,
+                                    finalWidth,
+                                    finalHeight,
+                                    true
+                                )
 
                             showBitmap(
                                 manager,
                                 ids,
-                                bitmap
+                                fittedBitmap
                             )
+
+                            if (
+                                fittedBitmap !== fullBitmap
+                            ) {
+                                fullBitmap.recycle()
+                            }
 
                             web.destroy()
                             stopSelf()
 
-                        }, 1500)
+                        }, 2000)
 
-                    }, 1500)
+                    }, 2000)
                 }
             }
 
