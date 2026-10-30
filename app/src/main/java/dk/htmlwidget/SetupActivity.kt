@@ -47,7 +47,12 @@ class SetupActivity : Activity() {
 
         url = EditText(this).apply {
             hint = "https://eksempel.dk"
-            setText(prefs.getString("url", ""))
+            setText(
+    prefs.getString(
+        "url_$appWidgetId",
+        ""
+    )
+)
             setSingleLine(true)
         }
 
