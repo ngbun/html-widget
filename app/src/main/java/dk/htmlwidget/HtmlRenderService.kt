@@ -28,9 +28,7 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-
         handler.post { render() }
-
         return START_NOT_STICKY
     }
 
@@ -42,8 +40,27 @@ class HtmlRenderService : Service() {
         val localUri =
             prefs.getString("localUri", null)
 
-        val address =
-            prefs.getString("url", "") ?: ""
+        /*
+         * Denne service håndterer KUN lokal HTML.
+         */
+        if (localUri.isNullOrBlank()) {
+            stopSelf()
+            return
+        }
+
+        val html = try {
+            contentResolver
+                .openInputStream(Uri.parse(localUri))
+                ?.bufferedReader()
+                ?.use { it.readText() }
+        } catch (_: Exception) {
+            null
+        }
+
+        if (html.isNullOrBlank()) {
+            stopSelf()
+            return
+        }
 
         val manager =
             AppWidgetManager.getInstance(this)
@@ -67,40 +84,31 @@ class HtmlRenderService : Service() {
         val density =
             resources.displayMetrics.density
 
-        val width =
-            (
-                options.getInt(
-                    AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
-                    300
-                ) * density
-            ).roundToInt()
+        val width = (
+            options.getInt(
+                AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+                300
+            ) * density
+        ).roundToInt().coerceAtLeast(1)
 
-        val height =
-            (
-                options.getInt(
-                    AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
-                    180
-                ) * density
-            ).roundToInt()
+        val height = (
+            options.getInt(
+                AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
+                180
+            ) * density
+        ).roundToInt().coerceAtLeast(1)
 
         val web = WebView(this)
 
-        /*
-         * Denne skal blive.
-         * Det var den, der løste den sorte/tomme
-         * WebView tidligere.
-         */
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
             null
         )
 
         web.settings.apply {
-
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
-
             useWideViewPort = true
             loadWithOverviewMode = false
         }
@@ -158,60 +166,13 @@ class HtmlRenderService : Service() {
                 }
             }
 
-        /*
-         * Lokal HTML-fil.
-         */
-        if (!localUri.isNullOrBlank()) {
-
-            val html = try {
-
-                contentResolver
-                    .openInputStream(
-                        Uri.parse(localUri)
-                    )
-                    ?.bufferedReader()
-                    ?.use { it.readText() }
-
-            } catch (_: Exception) {
-                null
-            }
-
-            if (!html.isNullOrBlank()) {
-
-                web.loadDataWithBaseURL(
-                    localUri,
-                    html,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
-
-                return
-            }
-        }
-
-        /*
-         * Hjemmeside.
-         */
-        
-    web.destroy()
-
-    val intent = Intent(
-        this,
-        WebsiteRenderActivity::class.java
-    )
-
-    intent.addFlags(
-        Intent.FLAG_ACTIVITY_NEW_TASK
-    )
-
-    startActivity(intent)
-
-    stopSelf()
-    return
-}
-
-        stopSelf()
+        web.loadDataWithBaseURL(
+            localUri,
+            html,
+            "text/html",
+            "UTF-8",
+            null
+        )
     }
 
     private fun makeBitmap(
@@ -233,8 +194,7 @@ class HtmlRenderService : Service() {
                     Bitmap.Config.ARGB_8888
                 )
 
-            val canvas =
-                Canvas(bitmap)
+            val canvas = Canvas(bitmap)
 
             web.draw(canvas)
 
