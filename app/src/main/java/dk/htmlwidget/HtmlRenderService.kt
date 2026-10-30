@@ -1,4 +1,4 @@
-package dk.htmlwidget
+opackage dk.htmlwidget
 
 import android.app.Service
 import android.appwidget.AppWidgetManager
@@ -233,14 +233,21 @@ val localUri =
 
     companion object {
 
-        fun start(context: Context) {
+        fun start(
+    context: Context,
+    appWidgetId: Int
+) {
+    val intent = Intent(
+        context,
+        HtmlRenderService::class.java
+    ).apply {
+        putExtra(
+            AppWidgetManager.EXTRA_APPWIDGET_ID,
+            appWidgetId
+        )
+    }
 
-            context.startService(
-                Intent(
-                    context,
-                    HtmlRenderService::class.java
-                )
-            )
-        }
+    context.startService(intent)
+}
     }
 }
