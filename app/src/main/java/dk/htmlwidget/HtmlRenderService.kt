@@ -39,14 +39,11 @@ class HtmlRenderService : Service() {
         val prefs =
             getSharedPreferences("settings", MODE_PRIVATE)
 
-        /*
-         * De to mulige kilder.
-         */
         val localUri =
             prefs.getString("localUri", null)
 
         val address =
-            prefs.getString("url", "") ?: ""
+            prefs.getString("url", "")?.trim() ?: ""
 
         val manager =
             AppWidgetManager.getInstance(this)
@@ -70,7 +67,7 @@ class HtmlRenderService : Service() {
         val density =
             resources.displayMetrics.density
 
-        val width =
+        val widgetWidth =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
@@ -80,7 +77,7 @@ class HtmlRenderService : Service() {
                 .roundToInt()
                 .coerceAtLeast(1)
 
-        val height =
+        val widgetHeight =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
@@ -90,31 +87,81 @@ class HtmlRenderService : Service() {
                 .roundToInt()
                 .coerceAtLeast(1)
 
-        val web = WebView(this)
-
         /*
-         * DENNE BEHOLDER VI.
-         * Det var software-renderingen,
-         * der fik widgetten til at virke.
+         * LOKAL HTML
+         *
+         * Behold den fungerende metode.
          */
-        web.setLayerType(
-            View.LAYER_TYPE_SOFTWARE,
-            null
-        )
+        if (!localUri.isNullOrBlank()) {
 
-        web.settings.apply {
+            val html = try {
 
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            loadsImagesAutomatically = true
+                contentResolver
+                    .openInputStream(
+                        Uri.parse(localUri)
+                    )
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
 
-            useWideViewPort = true
-            loadWithOverviewMode = false
+            } catch (_: Exception) {
+                null
+            }
+
+            if (!html.isNullOrBlank()) {
+
+                renderLocalHtml(
+                    html,
+                    localUri,
+                    manager,
+                    ids,
+                    widgetWidth,
+                    widgetHeight
+                )
+
+                return
+            }
         }
 
         /*
-         * WebView får præcis widgettens størrelse.
+         * HJEMMESIDE
          */
+        if (
+            address.startsWith("https://") ||
+            address.startsWith("http://")
+        ) {
+
+            renderWebsite(
+                address,
+                manager,
+                ids,
+                widgetWidth,
+                widgetHeight
+            )
+
+            return
+        }
+
+        stopSelf()
+    }
+
+
+    /*
+     * ==========================================
+     * LOKAL HTML
+     * ==========================================
+     */
+
+    private fun renderLocalHtml(
+        html: String,
+        localUri: String,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        width: Int,
+        height: Int
+    ) {
+
+        val web = createWebView()
+
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
                 width,
@@ -141,19 +188,11 @@ class HtmlRenderService : Service() {
                     url: String?
                 ) {
 
-                    /*
-                     * Vent på JavaScript, billeder,
-                     * priser osv.
-                     */
                     handler.postDelayed({
 
                         /*
-                         * Hvis det er vores HTML-widget,
-                         * får fitGrid mulighed for at
-                         * tilpasse tabellen igen.
-                         *
-                         * På almindelige hjemmesider
-                         * gør resize-eventet ingen skade.
+                         * Din elpris-HTML bruger resize
+                         * til fitGrid().
                          */
                         web.evaluateJavascript(
                             """
@@ -165,7 +204,7 @@ class HtmlRenderService : Service() {
 
                             handler.postDelayed({
 
-                                makeBitmap(
+                                drawDirect(
                                     web,
                                     manager,
                                     ids,
@@ -180,79 +219,155 @@ class HtmlRenderService : Service() {
                 }
             }
 
-        /*
-         * KILDE 1:
-         * Lokal HTML-fil.
-         */
-        if (!localUri.isNullOrBlank()) {
-
-            val html = try {
-
-                contentResolver
-                    .openInputStream(
-                        Uri.parse(localUri)
-                    )
-                    ?.bufferedReader()
-                    ?.use { it.readText() }
-
-            } catch (_: Exception) {
-                null
-            }
-
-            if (!html.isNullOrBlank()) {
-
-                web.loadDataWithBaseURL(
-                    localUri,
-                    html,
-                    "text/html",
-                    "UTF-8",
-                    null
-                )
-
-                return
-            }
-        }
-
-        /*
-         * KILDE 2:
-         * Hjemmeside.
-         */
-        if (
-            address.startsWith("https://") ||
-            address.startsWith("http://")
-        ) {
-
-            web.loadUrl(address)
-
-            return
-        }
-
-        /*
-         * Ingen gyldig kilde.
-         */
-        web.loadData(
-            """
-            <html>
-            <body style="
-                font-family:sans-serif;
-                padding:30px;
-                background:white;
-                color:black;
-            ">
-                <h2>HTML Widget</h2>
-                <p>
-                    Vælg en HTML-fil eller hjemmeside
-                    i appen.
-                </p>
-            </body>
-            </html>
-            """.trimIndent(),
+        web.loadDataWithBaseURL(
+            localUri,
+            html,
             "text/html",
-            "UTF-8"
+            "UTF-8",
+            null
         )
     }
 
-    private fun makeBitmap(
+
+    /*
+     * ==========================================
+     * HJEMMESIDE
+     * ==========================================
+     */
+
+    private fun renderWebsite(
+        address: String,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        widgetWidth: Int,
+        widgetHeight: Int
+    ) {
+
+        val web = createWebView()
+
+        /*
+         * Hjemmesiden får en større virtuel skærm.
+         *
+         * Vi bruger widgettens proportioner,
+         * men cirka dobbelt størrelse.
+         */
+        val pageWidth =
+            (widgetWidth * 2)
+                .coerceIn(1000, 1800)
+
+        val ratio =
+            widgetHeight.toFloat() /
+                widgetWidth.toFloat()
+
+        val pageHeight =
+            (pageWidth * ratio)
+                .roundToInt()
+                .coerceAtLeast(600)
+
+        web.settings.apply {
+
+            /*
+             * Få hjemmesider til at opføre sig mere
+             * som på tablet/desktop.
+             */
+            useWideViewPort = true
+            loadWithOverviewMode = true
+
+            userAgentString =
+                "Mozilla/5.0 (Linux; Android 13; Tablet) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/120.0 Safari/537.36"
+        }
+
+        web.measure(
+            View.MeasureSpec.makeMeasureSpec(
+                pageWidth,
+                View.MeasureSpec.EXACTLY
+            ),
+            View.MeasureSpec.makeMeasureSpec(
+                pageHeight,
+                View.MeasureSpec.EXACTLY
+            )
+        )
+
+        web.layout(
+            0,
+            0,
+            pageWidth,
+            pageHeight
+        )
+
+        web.webViewClient =
+            object : WebViewClient() {
+
+                override fun onPageFinished(
+                    view: WebView?,
+                    url: String?
+                ) {
+
+                    /*
+                     * Hjemmesider bruger ofte længere
+                     * tid på JS, billeder og layout.
+                     */
+                    handler.postDelayed({
+
+                        drawWebsite(
+                            web,
+                            manager,
+                            ids,
+                            pageWidth,
+                            pageHeight,
+                            widgetWidth,
+                            widgetHeight
+                        )
+
+                    }, 5000)
+                }
+            }
+
+        web.loadUrl(address)
+    }
+
+
+    /*
+     * ==========================================
+     * FÆLLES WEBVIEW
+     * ==========================================
+     */
+
+    private fun createWebView(): WebView {
+
+        val web = WebView(this)
+
+        /*
+         * Software-rendering skal beholdes.
+         */
+        web.setLayerType(
+            View.LAYER_TYPE_SOFTWARE,
+            null
+        )
+
+        web.settings.apply {
+
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadsImagesAutomatically = true
+
+            useWideViewPort = true
+            loadWithOverviewMode = false
+        }
+
+        return web
+    }
+
+
+    /*
+     * ==========================================
+     * HTML -> BITMAP
+     * ==========================================
+     */
+
+    private fun drawDirect(
         web: WebView,
         manager: AppWidgetManager,
         ids: IntArray,
@@ -271,28 +386,74 @@ class HtmlRenderService : Service() {
                     Bitmap.Config.ARGB_8888
                 )
 
-            val canvas =
+            web.draw(
                 Canvas(bitmap)
+            )
 
-            web.draw(canvas)
+            updateWidget(
+                manager,
+                ids,
+                bitmap
+            )
 
-            ids.forEach { id ->
+            web.destroy()
+            stopSelf()
 
-                val views =
-                    RemoteViews(
-                        packageName,
-                        R.layout.widget_layout
-                    )
+        }, 300)
+    }
 
-                views.setImageViewBitmap(
-                    R.id.widget_image,
-                    bitmap
+
+    /*
+     * ==========================================
+     * HJEMMESIDE -> BITMAP -> SKALER NED
+     * ==========================================
+     */
+
+    private fun drawWebsite(
+        web: WebView,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        pageWidth: Int,
+        pageHeight: Int,
+        widgetWidth: Int,
+        widgetHeight: Int
+    ) {
+
+        web.invalidate()
+
+        handler.postDelayed({
+
+            val largeBitmap =
+                Bitmap.createBitmap(
+                    pageWidth,
+                    pageHeight,
+                    Bitmap.Config.ARGB_8888
                 )
 
-                manager.updateAppWidget(
-                    id,
-                    views
+            web.draw(
+                Canvas(largeBitmap)
+            )
+
+            /*
+             * Hele den virtuelle browserflade
+             * skaleres til widgetten.
+             */
+            val bitmap =
+                Bitmap.createScaledBitmap(
+                    largeBitmap,
+                    widgetWidth,
+                    widgetHeight,
+                    true
                 )
+
+            updateWidget(
+                manager,
+                ids,
+                bitmap
+            )
+
+            if (bitmap !== largeBitmap) {
+                largeBitmap.recycle()
             }
 
             web.destroy()
@@ -300,6 +461,40 @@ class HtmlRenderService : Service() {
 
         }, 300)
     }
+
+
+    /*
+     * ==========================================
+     * OPDATER WIDGET
+     * ==========================================
+     */
+
+    private fun updateWidget(
+        manager: AppWidgetManager,
+        ids: IntArray,
+        bitmap: Bitmap
+    ) {
+
+        ids.forEach { id ->
+
+            val views =
+                RemoteViews(
+                    packageName,
+                    R.layout.widget_layout
+                )
+
+            views.setImageViewBitmap(
+                R.id.widget_image,
+                bitmap
+            )
+
+            manager.updateAppWidget(
+                id,
+                views
+            )
+        }
+    }
+
 
     companion object {
 
