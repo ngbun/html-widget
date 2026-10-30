@@ -8,7 +8,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
-import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -30,13 +29,17 @@ class HtmlRenderService : Service() {
         flags: Int,
         startId: Int
     ): Int {
-        main.post { renderWidgets() }
+        main.post { render() }
         return START_NOT_STICKY
     }
 
-    private fun renderWidgets() {
-        val manager = AppWidgetManager.getInstance(this)
+    private fun render() {
+        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
+        val local = prefs.getString("localUri", null)
+        val address = prefs.getString("url", "") ?: ""
+        val adBlock = prefs.getBoolean("adblock", true)
 
+        val manager = AppWidgetManager.getInstance(this)
         val ids = manager.getAppWidgetIds(
             ComponentName(this, HtmlWidgetProvider::class.java)
         )
@@ -46,72 +49,22 @@ class HtmlRenderService : Service() {
             return
         }
 
-        renderNext(manager, ids, 0)
-    }
-
-    private fun renderNext(
-        manager: AppWidgetManager,
-        ids: IntArray,
-        index: Int
-    ) {
-        if (index >= ids.size) {
-            stopSelf()
-            return
-        }
-
-        val widgetId = ids[index]
-        val options = manager.getAppWidgetOptions(widgetId)
-
-        val minWidthDp = options.getInt(
-            AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
-            300
-        )
-
-        val minHeightDp = options.getInt(
-            AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
-            180
-        )
-
+        val options = manager.getAppWidgetOptions(ids[0])
         val density = resources.displayMetrics.density
 
-        val widgetWidth =
-            (minWidthDp * density).toInt().coerceAtLeast(400)
+        val width = (
+            options.getInt(
+                AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
+                300
+            ) * density * 1.5f
+        ).toInt().coerceIn(600, 1800)
 
-        val widgetHeight =
-            (minHeightDp * density).toInt().coerceAtLeast(220)
-
-        /*
-         * Vi renderer i højere opløsning end selve widgetten.
-         * Det giver skarpere tekst, når Android viser billedet.
-         */
-        val renderWidth =
-            (widgetWidth * 1.5f).toInt().coerceAtMost(1800)
-
-        val renderHeight =
-            (widgetHeight * 1.5f).toInt().coerceAtMost(1200)
-
-        renderWidget(
-            manager,
-            widgetId,
-            renderWidth,
-            renderHeight
-        ) {
-            renderNext(manager, ids, index + 1)
-        }
-    }
-
-    private fun renderWidget(
-        manager: AppWidgetManager,
-        widgetId: Int,
-        width: Int,
-        height: Int,
-        finished: () -> Unit
-    ) {
-        val prefs = getSharedPreferences("settings", MODE_PRIVATE)
-
-        val local = prefs.getString("localUri", null)
-        val address = prefs.getString("url", "") ?: ""
-        val adBlock = prefs.getBoolean("adblock", true)
+        val height = (
+            options.getInt(
+                AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
+                180
+            ) * density * 1.5f
+        ).toInt().coerceIn(300, 1200)
 
         val web = WebView(this)
 
@@ -121,12 +74,11 @@ class HtmlRenderService : Service() {
             loadsImagesAutomatically = true
             useWideViewPort = true
             loadWithOverviewMode = true
-            builtInZoomControls = false
-            displayZoomControls = false
-            setSupportZoom(false)
         }
 
-        web.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        web.setBackgroundColor(
+            android.graphics.Color.TRANSPARENT
+        )
 
         web.webViewClient = object : WebViewClient() {
 
@@ -135,74 +87,60 @@ class HtmlRenderService : Service() {
                 request: WebResourceRequest?
             ): WebResourceResponse? {
 
-                if (adBlock) {
-                    val host =
-                        request?.url?.host?.lowercase()
-                            ?: return null
+                if (!adBlock) return null
 
-                    val blocked = listOf(
-                        "doubleclick.net",
-                        "googlesyndication.com",
-                        "googleadservices.com",
-                        "adservice.google.com",
-                        "googletagmanager.com",
-                        "google-analytics.com",
-                        "adnxs.com",
-                        "criteo.com"
+                val host = request?.url?.host?.lowercase()
+                    ?: return null
+
+                val blocked = listOf(
+                    "doubleclick.net",
+                    "googlesyndication.com",
+                    "googleadservices.com",
+                    "google-analytics.com",
+                    "adnxs.com"
+                )
+
+                if (blocked.any {
+                    host == it || host.endsWith(".$it")
+                }) {
+                    return WebResourceResponse(
+                        "text/plain",
+                        "utf-8",
+                        ByteArrayInputStream(ByteArray(0))
                     )
-
-                    if (
-                        blocked.any {
-                            host == it || host.endsWith(".$it")
-                        }
-                    ) {
-                        return WebResourceResponse(
-                            "text/plain",
-                            "utf-8",
-                            204,
-                            "Blocked",
-                            emptyMap(),
-                            ByteArrayInputStream(ByteArray(0))
-                        )
-                    }
                 }
 
-                return super.shouldInterceptRequest(view, request)
+                return null
             }
 
             override fun onPageFinished(
                 view: WebView?,
                 url: String?
             ) {
-                /*
-                 * Giver JavaScript/API-kald i HTML-filen lidt tid til
-                 * at hente priser og tegne tabellen færdig.
-                 */
                 main.postDelayed({
 
-                    try {
-                        web.measure(
-                            android.view.View.MeasureSpec.makeMeasureSpec(
-                                width,
-                                android.view.View.MeasureSpec.EXACTLY
-                            ),
-                            android.view.View.MeasureSpec.makeMeasureSpec(
-                                height,
-                                android.view.View.MeasureSpec.EXACTLY
-                            )
-                        )
-
-                        web.layout(0, 0, width, height)
-
-                        val bitmap = Bitmap.createBitmap(
+                    web.measure(
+                        android.view.View.MeasureSpec.makeMeasureSpec(
                             width,
+                            android.view.View.MeasureSpec.EXACTLY
+                        ),
+                        android.view.View.MeasureSpec.makeMeasureSpec(
                             height,
-                            Bitmap.Config.ARGB_8888
+                            android.view.View.MeasureSpec.EXACTLY
                         )
+                    )
 
-                        val canvas = Canvas(bitmap)
-                        web.draw(canvas)
+                    web.layout(0, 0, width, height)
 
+                    val bitmap = Bitmap.createBitmap(
+                        width,
+                        height,
+                        Bitmap.Config.ARGB_8888
+                    )
+
+                    web.draw(Canvas(bitmap))
+
+                    ids.forEach { id ->
                         val views = RemoteViews(
                             packageName,
                             R.layout.widget_layout
@@ -213,32 +151,75 @@ class HtmlRenderService : Service() {
                             bitmap
                         )
 
-                        manager.updateAppWidget(
-                            widgetId,
-                            views
-                        )
-
-                    } catch (_: Exception) {
-                    } finally {
-                        web.destroy()
-                        finished()
+                        manager.updateAppWidget(id, views)
                     }
+
+                    web.destroy()
+                    stopSelf()
 
                 }, 3500)
             }
         }
 
-        when {
-            !local.isNullOrBlank() -> {
-                try {
-                    val uri = Uri.parse(local)
+        if (!local.isNullOrBlank()) {
 
-                    val html =
-                        contentResolver
-                            .openInputStream(uri)
-                            ?.bufferedReader()
-                            ?.use { it.readText() }
+            try {
+                val uri = Uri.parse(local)
 
-                    if (html != null) {
-                        web.loadDataWithBaseURL(
-                           
+                val html = contentResolver
+                    .openInputStream(uri)
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
+
+                if (html != null) {
+                    web.loadDataWithBaseURL(
+                        local,
+                        html,
+                        "text/html",
+                        "UTF-8",
+                        null
+                    )
+                } else {
+                    showError(web)
+                }
+
+            } catch (_: Exception) {
+                showError(web)
+            }
+
+        } else if (
+            address.startsWith("https://") ||
+            address.startsWith("http://")
+        ) {
+
+            web.loadUrl(address)
+
+        } else {
+
+            showError(web)
+        }
+    }
+
+    private fun showError(web: WebView) {
+        web.loadData(
+            """
+            <html>
+            <body style="background:#111;color:white;font-family:sans-serif">
+            <h2>HTML Widget</h2>
+            <p>Vælg en HTML-fil eller hjemmeside i appen.</p>
+            </body>
+            </html>
+            """.trimIndent(),
+            "text/html",
+            "UTF-8"
+        )
+    }
+
+    companion object {
+        fun start(context: Context) {
+            context.startService(
+                Intent(context, HtmlRenderService::class.java)
+            )
+        }
+    }
+}
