@@ -15,6 +15,7 @@ import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.RemoteViews
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 class HtmlRenderService : Service() {
@@ -98,13 +99,13 @@ class HtmlRenderService : Service() {
             ).roundToInt()
 
         /*
-         * Bred viewport til hele 24-timers tabellen.
-         *
-         * WebView får derefter lov til selv at zoome
-         * hele siden ned.
+         * Stor arbejdsflade.
+         * Dette er IKKE HTML'ens faste størrelse.
+         * Den bruges kun til at give brede sider plads
+         * mens vi måler deres rigtige indhold.
          */
-        val renderWidth = 3600
-        val renderHeight = 1100
+        val workWidth = 5000
+        val workHeight = 2000
 
         val web = WebView(this)
 
@@ -117,41 +118,27 @@ class HtmlRenderService : Service() {
             javaScriptEnabled = true
             domStorageEnabled = true
             loadsImagesAutomatically = true
-
             useWideViewPort = true
-            loadWithOverviewMode = true
-
-            builtInZoomControls = false
-            displayZoomControls = false
+            loadWithOverviewMode = false
         }
 
-        /*
-         * Gør selve HTML-dokumentet bredt.
-         * Vi ændrer ikke din HTML-fil permanent.
-         */
-        val fittedHtml =
-            html.replace(
-                "<head>",
-                """
-                <head>
-                <style>
-                    html {
-                        width: 2400px !important;
-                    }
-
-                    body {
-                        width: 2400px !important;
-                        max-width: none !important;
-                        overflow: visible !important;
-                    }
-
-                    table {
-                        max-width: none !important;
-                    }
-                </style>
-                """.trimIndent(),
-                ignoreCase = true
+        web.measure(
+            View.MeasureSpec.makeMeasureSpec(
+                workWidth,
+                View.MeasureSpec.EXACTLY
+            ),
+            View.MeasureSpec.makeMeasureSpec(
+                workHeight,
+                View.MeasureSpec.EXACTLY
             )
+        )
+
+        web.layout(
+            0,
+            0,
+            workWidth,
+            workHeight
+        )
 
         web.webViewClient =
             object : WebViewClient() {
@@ -162,105 +149,243 @@ class HtmlRenderService : Service() {
                 ) {
 
                     /*
-                     * Tid til at hente alle elpriserne.
+                     * Vent på priser og JavaScript.
                      */
                     handler.postDelayed({
 
-                        web.measure(
-                            View.MeasureSpec.makeMeasureSpec(
-                                renderWidth,
-                                View.MeasureSpec.EXACTLY
-                            ),
-                            View.MeasureSpec.makeMeasureSpec(
-                                renderHeight,
-                                View.MeasureSpec.EXACTLY
-                            )
-                        )
+                        /*
+                         * Find den yderste kant af ALLE
+                         * synlige elementer.
+                         *
+                         * Vi ændrer ikke viewporten bagefter.
+                         */
+                        web.evaluateJavascript(
+                            """
+                            (function() {
 
-                        web.layout(
-                            0,
-                            0,
-                            renderWidth,
-                            renderHeight
-                        )
+                                var elements =
+                                    document.querySelectorAll('*');
 
-                        web.invalidate()
+                                var maxRight = 0;
+                                var maxBottom = 0;
 
-                        handler.postDelayed({
+                                for (
+                                    var i = 0;
+                                    i < elements.length;
+                                    i++
+                                ) {
 
-                            val fullBitmap =
-                                Bitmap.createBitmap(
-                                    renderWidth,
-                                    renderHeight,
-                                    Bitmap.Config.ARGB_8888
-                                )
+                                    var el = elements[i];
 
-                            val canvas =
-                                Canvas(fullBitmap)
+                                    var style =
+                                        window.getComputedStyle(el);
 
-                            web.draw(canvas)
+                                    if (
+                                        style.display === 'none' ||
+                                        style.visibility === 'hidden'
+                                    ) {
+                                        continue;
+                                    }
+
+                                    var r =
+                                        el.getBoundingClientRect();
+
+                                    if (
+                                        r.width > 0 &&
+                                        r.height > 0
+                                    ) {
+                                        maxRight =
+                                            Math.max(
+                                                maxRight,
+                                                r.right
+                                            );
+
+                                        maxBottom =
+                                            Math.max(
+                                                maxBottom,
+                                                r.bottom
+                                            );
+                                    }
+                                }
+
+                                maxRight =
+                                    Math.max(
+                                        maxRight,
+                                        document.body.scrollWidth,
+                                        document.documentElement.scrollWidth
+                                    );
+
+                                maxBottom =
+                                    Math.max(
+                                        maxBottom,
+                                        document.body.scrollHeight,
+                                        document.documentElement.scrollHeight
+                                    );
+
+                                return (
+                                    Math.ceil(maxRight) +
+                                    "," +
+                                    Math.ceil(maxBottom)
+                                );
+                            })();
+                            """.trimIndent()
+                        ) { result ->
+
+                            val clean =
+                                result
+                                    .replace("\"", "")
+                                    .trim()
+
+                            val parts =
+                                clean.split(",")
+
+                            var contentWidth =
+                                parts
+                                    .getOrNull(0)
+                                    ?.toIntOrNull()
+                                    ?: workWidth
+
+                            var contentHeight =
+                                parts
+                                    .getOrNull(1)
+                                    ?.toIntOrNull()
+                                    ?: workHeight
 
                             /*
-                             * Nu skalerer vi hele det færdige
-                             * billede til widgettens bredde.
+                             * Lille sikkerhedsmargin.
                              */
-                            val ratio =
-                                widgetWidth.toFloat() /
-                                    renderWidth.toFloat()
+                            contentWidth += 20
+                            contentHeight += 20
 
-                            val finalHeight =
-                                (renderHeight * ratio)
-                                    .roundToInt()
-                                    .coerceAtMost(widgetHeight)
-                                    .coerceAtLeast(1)
-
-                            val fittedBitmap =
-                                Bitmap.createScaledBitmap(
-                                    fullBitmap,
-                                    widgetWidth,
-                                    finalHeight,
-                                    true
+                            contentWidth =
+                                contentWidth.coerceIn(
+                                    1,
+                                    workWidth
                                 )
 
-                            ids.forEach { id ->
-
-                                val views =
-                                    RemoteViews(
-                                        packageName,
-                                        R.layout.widget_layout
-                                    )
-
-                                views.setImageViewBitmap(
-                                    R.id.widget_image,
-                                    fittedBitmap
+                            contentHeight =
+                                contentHeight.coerceIn(
+                                    1,
+                                    workHeight
                                 )
 
-                                manager.updateAppWidget(
-                                    id,
-                                    views
-                                )
-                            }
+                            makeBitmap(
+                                web,
+                                manager,
+                                ids,
+                                contentWidth,
+                                contentHeight,
+                                widgetWidth,
+                                widgetHeight
+                            )
+                        }
 
-                            if (fittedBitmap !== fullBitmap) {
-                                fullBitmap.recycle()
-                            }
-
-                            web.destroy()
-                            stopSelf()
-
-                        }, 1500)
-
-                    }, 3500)
+                    }, 4000)
                 }
             }
 
         web.loadDataWithBaseURL(
             localUri,
-            fittedHtml,
+            html,
             "text/html",
             "UTF-8",
             null
         )
+    }
+
+    private fun makeBitmap(
+        web: WebView,
+        manager: AppWidgetManager,
+        ids: IntArray,
+        contentWidth: Int,
+        contentHeight: Int,
+        widgetWidth: Int,
+        widgetHeight: Int
+    ) {
+
+        /*
+         * WebView'en ændres IKKE i størrelse her.
+         *
+         * Vi tegner kun det område, som JavaScript
+         * har fundet indeholder HTML'en.
+         */
+        val fullBitmap =
+            Bitmap.createBitmap(
+                contentWidth,
+                contentHeight,
+                Bitmap.Config.ARGB_8888
+            )
+
+        val canvas =
+            Canvas(fullBitmap)
+
+        web.draw(canvas)
+
+        /*
+         * Hele HTML-indholdet skal være indenfor
+         * både widgettens bredde OG højde.
+         */
+        val scaleX =
+            widgetWidth.toFloat() /
+                contentWidth.toFloat()
+
+        val scaleY =
+            widgetHeight.toFloat() /
+                contentHeight.toFloat()
+
+        /*
+         * Vi forstørrer ikke små HTML-sider over
+         * deres oprindelige størrelse.
+         */
+        val scale =
+            min(
+                1f,
+                min(scaleX, scaleY)
+            )
+
+        val finalWidth =
+            (contentWidth * scale)
+                .roundToInt()
+                .coerceAtLeast(1)
+
+        val finalHeight =
+            (contentHeight * scale)
+                .roundToInt()
+                .coerceAtLeast(1)
+
+        val fittedBitmap =
+            Bitmap.createScaledBitmap(
+                fullBitmap,
+                finalWidth,
+                finalHeight,
+                true
+            )
+
+        ids.forEach { id ->
+
+            val views =
+                RemoteViews(
+                    packageName,
+                    R.layout.widget_layout
+                )
+
+            views.setImageViewBitmap(
+                R.id.widget_image,
+                fittedBitmap
+            )
+
+            manager.updateAppWidget(
+                id,
+                views
+            )
+        }
+
+        if (fittedBitmap !== fullBitmap) {
+            fullBitmap.recycle()
+        }
+
+        web.destroy()
+        stopSelf()
     }
 
     companion object {
