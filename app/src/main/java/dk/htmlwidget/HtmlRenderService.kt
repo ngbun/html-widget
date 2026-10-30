@@ -2,7 +2,6 @@ package dk.htmlwidget
 
 import android.app.Service
 import android.appwidget.AppWidgetManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -80,13 +79,7 @@ val localUri =
         val manager =
             AppWidgetManager.getInstance(this)
 
-        val ids =
-            manager.getAppWidgetIds(
-                ComponentName(
-                    this,
-                    HtmlWidgetProvider::class.java
-                )
-            )
+        val ids = intArrayOf(appWidgetId)
 
         if (ids.isEmpty()) {
             stopSelf()
