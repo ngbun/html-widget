@@ -194,14 +194,25 @@ class HtmlRenderService : Service() {
          * Hjemmeside.
          */
         if (
-            address.startsWith("https://") ||
-            address.startsWith("http://")
-        ) {
+    address.startsWith("https://") ||
+    address.startsWith("http://")
+) {
+    web.destroy()
 
-            web.loadUrl(address)
+    val intent = Intent(
+        this,
+        WebsiteRenderActivity::class.java
+    )
 
-            return
-        }
+    intent.addFlags(
+        Intent.FLAG_ACTIVITY_NEW_TASK
+    )
+
+    startActivity(intent)
+
+    stopSelf()
+    return
+}
 
         stopSelf()
     }
