@@ -94,18 +94,18 @@ prefs.edit().apply {
 
         // Hjemmeside valgt:
         // gem URL og fjern gammel HTML-fil
-        putString("url", website)
-        remove("localUri")
+        putString("url_$appWidgetId", website)
+remove("localUri_$appWidgetId")
 
     } else if (localUri != null) {
 
         // HTML-fil valgt:
         // gem filen og fjern gammel hjemmeside
         putString(
-            "localUri",
-            localUri.toString()
-        )
-        remove("url")
+    "localUri_$appWidgetId",
+    localUri.toString()
+)
+remove("url_$appWidgetId")
     }
 
     putBoolean(
