@@ -67,7 +67,7 @@ class HtmlRenderService : Service() {
         val density =
             resources.displayMetrics.density
 
-        val widgetWidth =
+        val width =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
@@ -77,7 +77,7 @@ class HtmlRenderService : Service() {
                 .roundToInt()
                 .coerceAtLeast(1)
 
-        val widgetHeight =
+        val height =
             (
                 options.getInt(
                     AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
@@ -87,81 +87,31 @@ class HtmlRenderService : Service() {
                 .roundToInt()
                 .coerceAtLeast(1)
 
+        val web = WebView(this)
+
         /*
-         * LOKAL HTML
-         *
-         * Behold den fungerende metode.
+         * Denne er vigtig.
+         * Uden software-rendering fik vi tidligere
+         * en tom/sort widget.
          */
-        if (!localUri.isNullOrBlank()) {
+        web.setLayerType(
+            View.LAYER_TYPE_SOFTWARE,
+            null
+        )
 
-            val html = try {
+        web.settings.apply {
 
-                contentResolver
-                    .openInputStream(
-                        Uri.parse(localUri)
-                    )
-                    ?.bufferedReader()
-                    ?.use { it.readText() }
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            loadsImagesAutomatically = true
 
-            } catch (_: Exception) {
-                null
-            }
-
-            if (!html.isNullOrBlank()) {
-
-                renderLocalHtml(
-                    html,
-                    localUri,
-                    manager,
-                    ids,
-                    widgetWidth,
-                    widgetHeight
-                )
-
-                return
-            }
+            useWideViewPort = true
+            loadWithOverviewMode = false
         }
 
         /*
-         * HJEMMESIDE
+         * WebView får samme størrelse som widgetten.
          */
-        if (
-            address.startsWith("https://") ||
-            address.startsWith("http://")
-        ) {
-
-            renderWebsite(
-                address,
-                manager,
-                ids,
-                widgetWidth,
-                widgetHeight
-            )
-
-            return
-        }
-
-        stopSelf()
-    }
-
-
-    /*
-     * ==========================================
-     * LOKAL HTML
-     * ==========================================
-     */
-
-    private fun renderLocalHtml(
-        html: String,
-        localUri: String,
-        manager: AppWidgetManager,
-        ids: IntArray,
-        width: Int,
-        height: Int
-    ) {
-
-        val web = createWebView()
-
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
                 width,
@@ -188,11 +138,18 @@ class HtmlRenderService : Service() {
                     url: String?
                 ) {
 
+                    /*
+                     * Vent på JavaScript, billeder,
+                     * priser og hjemmesidens layout.
+                     */
                     handler.postDelayed({
 
                         /*
-                         * Din elpris-HTML bruger resize
-                         * til fitGrid().
+                         * Den lokale elpris-HTML bruger
+                         * resize-eventet til fitGrid().
+                         *
+                         * På en almindelig hjemmeside
+                         * er det også ufarligt.
                          */
                         web.evaluateJavascript(
                             """
@@ -204,7 +161,7 @@ class HtmlRenderService : Service() {
 
                             handler.postDelayed({
 
-                                drawDirect(
+                                makeBitmap(
                                     web,
                                     manager,
                                     ids,
@@ -215,159 +172,59 @@ class HtmlRenderService : Service() {
                             }, 1200)
                         }
 
-                    }, 4000)
-                }
-            }
-
-        web.loadDataWithBaseURL(
-            localUri,
-            html,
-            "text/html",
-            "UTF-8",
-            null
-        )
-    }
-
-
-    /*
-     * ==========================================
-     * HJEMMESIDE
-     * ==========================================
-     */
-
-    private fun renderWebsite(
-        address: String,
-        manager: AppWidgetManager,
-        ids: IntArray,
-        widgetWidth: Int,
-        widgetHeight: Int
-    ) {
-
-        val web = createWebView()
-
-        /*
-         * Hjemmesiden får en større virtuel skærm.
-         *
-         * Vi bruger widgettens proportioner,
-         * men cirka dobbelt størrelse.
-         */
-        val pageWidth =
-            (widgetWidth * 2)
-                .coerceIn(1000, 1800)
-
-        val ratio =
-            widgetHeight.toFloat() /
-                widgetWidth.toFloat()
-
-        val pageHeight =
-            (pageWidth * ratio)
-                .roundToInt()
-                .coerceAtLeast(600)
-
-        web.settings.apply {
-
-            /*
-             * Få hjemmesider til at opføre sig mere
-             * som på tablet/desktop.
-             */
-            useWideViewPort = true
-            loadWithOverviewMode = true
-
-            userAgentString =
-                "Mozilla/5.0 (Linux; Android 13; Tablet) " +
-                "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                "Chrome/120.0 Safari/537.36"
-        }
-
-        web.measure(
-            View.MeasureSpec.makeMeasureSpec(
-                pageWidth,
-                View.MeasureSpec.EXACTLY
-            ),
-            View.MeasureSpec.makeMeasureSpec(
-                pageHeight,
-                View.MeasureSpec.EXACTLY
-            )
-        )
-
-        web.layout(
-            0,
-            0,
-            pageWidth,
-            pageHeight
-        )
-
-        web.webViewClient =
-            object : WebViewClient() {
-
-                override fun onPageFinished(
-                    view: WebView?,
-                    url: String?
-                ) {
-
-                    /*
-                     * Hjemmesider bruger ofte længere
-                     * tid på JS, billeder og layout.
-                     */
-                    handler.postDelayed({
-
-                        drawWebsite(
-                            web,
-                            manager,
-                            ids,
-                            pageWidth,
-                            pageHeight,
-                            widgetWidth,
-                            widgetHeight
-                        )
-
                     }, 5000)
                 }
             }
 
-        web.loadUrl(address)
-    }
-
-
-    /*
-     * ==========================================
-     * FÆLLES WEBVIEW
-     * ==========================================
-     */
-
-    private fun createWebView(): WebView {
-
-        val web = WebView(this)
-
         /*
-         * Software-rendering skal beholdes.
+         * LOKAL HTML
          */
-        web.setLayerType(
-            View.LAYER_TYPE_SOFTWARE,
-            null
-        )
+        if (!localUri.isNullOrBlank()) {
 
-        web.settings.apply {
+            val html = try {
 
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            loadsImagesAutomatically = true
+                contentResolver
+                    .openInputStream(
+                        Uri.parse(localUri)
+                    )
+                    ?.bufferedReader()
+                    ?.use { it.readText() }
 
-            useWideViewPort = true
-            loadWithOverviewMode = false
+            } catch (_: Exception) {
+                null
+            }
+
+            if (!html.isNullOrBlank()) {
+
+                web.loadDataWithBaseURL(
+                    localUri,
+                    html,
+                    "text/html",
+                    "UTF-8",
+                    null
+                )
+
+                return
+            }
         }
 
-        return web
+        /*
+         * HJEMMESIDE
+         */
+        if (
+            address.startsWith("https://") ||
+            address.startsWith("http://")
+        ) {
+
+            web.loadUrl(address)
+
+            return
+        }
+
+        stopSelf()
     }
 
-
-    /*
-     * ==========================================
-     * HTML -> BITMAP
-     * ==========================================
-     */
-
-    private fun drawDirect(
+    private fun makeBitmap(
         web: WebView,
         manager: AppWidgetManager,
         ids: IntArray,
@@ -386,74 +243,28 @@ class HtmlRenderService : Service() {
                     Bitmap.Config.ARGB_8888
                 )
 
-            web.draw(
+            val canvas =
                 Canvas(bitmap)
-            )
 
-            updateWidget(
-                manager,
-                ids,
-                bitmap
-            )
+            web.draw(canvas)
 
-            web.destroy()
-            stopSelf()
+            ids.forEach { id ->
 
-        }, 300)
-    }
+                val views =
+                    RemoteViews(
+                        packageName,
+                        R.layout.widget_layout
+                    )
 
-
-    /*
-     * ==========================================
-     * HJEMMESIDE -> BITMAP -> SKALER NED
-     * ==========================================
-     */
-
-    private fun drawWebsite(
-        web: WebView,
-        manager: AppWidgetManager,
-        ids: IntArray,
-        pageWidth: Int,
-        pageHeight: Int,
-        widgetWidth: Int,
-        widgetHeight: Int
-    ) {
-
-        web.invalidate()
-
-        handler.postDelayed({
-
-            val largeBitmap =
-                Bitmap.createBitmap(
-                    pageWidth,
-                    pageHeight,
-                    Bitmap.Config.ARGB_8888
+                views.setImageViewBitmap(
+                    R.id.widget_image,
+                    bitmap
                 )
 
-            web.draw(
-                Canvas(largeBitmap)
-            )
-
-            /*
-             * Hele den virtuelle browserflade
-             * skaleres til widgetten.
-             */
-            val bitmap =
-                Bitmap.createScaledBitmap(
-                    largeBitmap,
-                    widgetWidth,
-                    widgetHeight,
-                    true
+                manager.updateAppWidget(
+                    id,
+                    views
                 )
-
-            updateWidget(
-                manager,
-                ids,
-                bitmap
-            )
-
-            if (bitmap !== largeBitmap) {
-                largeBitmap.recycle()
             }
 
             web.destroy()
@@ -461,40 +272,6 @@ class HtmlRenderService : Service() {
 
         }, 300)
     }
-
-
-    /*
-     * ==========================================
-     * OPDATER WIDGET
-     * ==========================================
-     */
-
-    private fun updateWidget(
-        manager: AppWidgetManager,
-        ids: IntArray,
-        bitmap: Bitmap
-    ) {
-
-        ids.forEach { id ->
-
-            val views =
-                RemoteViews(
-                    packageName,
-                    R.layout.widget_layout
-                )
-
-            views.setImageViewBitmap(
-                R.id.widget_image,
-                bitmap
-            )
-
-            manager.updateAppWidget(
-                id,
-                views
-            )
-        }
-    }
-
 
     companion object {
 
