@@ -110,7 +110,14 @@ prefs.edit().apply {
 
     apply()
 }
-
+if (website.isNotEmpty()) {
+    startActivity(
+        Intent(
+            this,
+            WebsiteRenderActivity::class.java
+        )
+    )
+}
                 val request =
                     PeriodicWorkRequestBuilder<RefreshWorker>(
                         15,
