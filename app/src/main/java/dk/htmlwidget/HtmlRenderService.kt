@@ -1,4 +1,4 @@
-opackage dk.htmlwidget
+package dk.htmlwidget
 
 import android.app.Service
 import android.appwidget.AppWidgetManager
