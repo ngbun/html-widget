@@ -193,10 +193,7 @@ class HtmlRenderService : Service() {
         /*
          * Hjemmeside.
          */
-        if (
-    address.startsWith("https://") ||
-    address.startsWith("http://")
-) {
+        
     web.destroy()
 
     val intent = Intent(
