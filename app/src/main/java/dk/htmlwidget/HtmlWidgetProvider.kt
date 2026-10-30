@@ -83,6 +83,10 @@ class HtmlWidgetProvider : AppWidgetProvider() {
                         context,
                         WebsiteRenderActivity::class.java
                     ).apply {
+                        putExtra(
+    AppWidgetManager.EXTRA_APPWIDGET_ID,
+    id
+)
                         flags =
                             Intent.FLAG_ACTIVITY_NEW_TASK or
                             Intent.FLAG_ACTIVITY_CLEAR_TOP
