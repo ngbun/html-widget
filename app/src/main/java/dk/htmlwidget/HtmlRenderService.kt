@@ -43,7 +43,7 @@ class HtmlRenderService : Service() {
             prefs.getString("localUri", null)
 
         val address =
-            prefs.getString("url", "")?.trim() ?: ""
+            prefs.getString("url", "") ?: ""
 
         val manager =
             AppWidgetManager.getInstance(this)
@@ -73,9 +73,7 @@ class HtmlRenderService : Service() {
                     AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH,
                     300
                 ) * density
-            )
-                .roundToInt()
-                .coerceAtLeast(1)
+            ).roundToInt()
 
         val height =
             (
@@ -83,16 +81,14 @@ class HtmlRenderService : Service() {
                     AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,
                     180
                 ) * density
-            )
-                .roundToInt()
-                .coerceAtLeast(1)
+            ).roundToInt()
 
         val web = WebView(this)
 
         /*
-         * Denne er vigtig.
-         * Uden software-rendering fik vi tidligere
-         * en tom/sort widget.
+         * Denne skal blive.
+         * Det var den, der løste den sorte/tomme
+         * WebView tidligere.
          */
         web.setLayerType(
             View.LAYER_TYPE_SOFTWARE,
@@ -109,9 +105,6 @@ class HtmlRenderService : Service() {
             loadWithOverviewMode = false
         }
 
-        /*
-         * WebView får samme størrelse som widgetten.
-         */
         web.measure(
             View.MeasureSpec.makeMeasureSpec(
                 width,
@@ -138,19 +131,8 @@ class HtmlRenderService : Service() {
                     url: String?
                 ) {
 
-                    /*
-                     * Vent på JavaScript, billeder,
-                     * priser og hjemmesidens layout.
-                     */
                     handler.postDelayed({
 
-                        /*
-                         * Den lokale elpris-HTML bruger
-                         * resize-eventet til fitGrid().
-                         *
-                         * På en almindelig hjemmeside
-                         * er det også ufarligt.
-                         */
                         web.evaluateJavascript(
                             """
                             window.dispatchEvent(
@@ -172,12 +154,12 @@ class HtmlRenderService : Service() {
                             }, 1200)
                         }
 
-                    }, 5000)
+                    }, 4000)
                 }
             }
 
         /*
-         * LOKAL HTML
+         * Lokal HTML-fil.
          */
         if (!localUri.isNullOrBlank()) {
 
@@ -209,7 +191,7 @@ class HtmlRenderService : Service() {
         }
 
         /*
-         * HJEMMESIDE
+         * Hjemmeside.
          */
         if (
             address.startsWith("https://") ||
