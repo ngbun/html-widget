@@ -125,7 +125,12 @@ if (website.isNotEmpty()) {
         Intent(
             this@SetupActivity,
             WebsiteRenderActivity::class.java
-        )
+        ).apply {
+            putExtra(
+                AppWidgetManager.EXTRA_APPWIDGET_ID,
+                appWidgetId
+            )
+        }
     )
 }
                 val request =
