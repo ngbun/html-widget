@@ -7,12 +7,16 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.RemoteViews
 
 class HtmlRenderService : Service() {
+
+    private val main = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -22,72 +26,149 @@ class HtmlRenderService : Service() {
         startId: Int
     ): Int {
 
+        main.post { makeHtmlWidget() }
+
+        return START_NOT_STICKY
+    }
+
+    private fun makeHtmlWidget() {
+
+        val web = WebView(this)
+
+        web.settings.javaScriptEnabled = true
+        web.setBackgroundColor(
+            android.graphics.Color.TRANSPARENT
+        )
+
         val width = 1000
         val height = 500
 
-        val bitmap = Bitmap.createBitmap(
-            width,
-            height,
-            Bitmap.Config.ARGB_8888
-        )
+        web.webViewClient = object : WebViewClient() {
 
-        val canvas = Canvas(bitmap)
+            override fun onPageFinished(
+                view: WebView?,
+                url: String?
+            ) {
 
-        canvas.drawColor(Color.rgb(25, 25, 25))
+                main.postDelayed({
 
-        val paint = Paint().apply {
-            color = Color.WHITE
-            textSize = 70f
-            isAntiAlias = true
+                    web.measure(
+                        android.view.View.MeasureSpec.makeMeasureSpec(
+                            width,
+                            android.view.View.MeasureSpec.EXACTLY
+                        ),
+                        android.view.View.MeasureSpec.makeMeasureSpec(
+                            height,
+                            android.view.View.MeasureSpec.EXACTLY
+                        )
+                    )
+
+                    web.layout(
+                        0,
+                        0,
+                        width,
+                        height
+                    )
+
+                    val bitmap = Bitmap.createBitmap(
+                        width,
+                        height,
+                        Bitmap.Config.ARGB_8888
+                    )
+
+                    val canvas = Canvas(bitmap)
+
+                    web.draw(canvas)
+
+                    val manager =
+                        AppWidgetManager.getInstance(
+                            this@HtmlRenderService
+                        )
+
+                    val ids =
+                        manager.getAppWidgetIds(
+                            ComponentName(
+                                this@HtmlRenderService,
+                                HtmlWidgetProvider::class.java
+                            )
+                        )
+
+                    ids.forEach { id ->
+
+                        val remoteViews = RemoteViews(
+                            packageName,
+                            R.layout.widget_layout
+                        )
+
+                        remoteViews.setImageViewBitmap(
+                            R.id.widget_image,
+                            bitmap
+                        )
+
+                        manager.updateAppWidget(
+                            id,
+                            remoteViews
+                        )
+                    }
+
+                    web.destroy()
+                    stopSelf()
+
+                }, 1000)
+            }
         }
 
-        canvas.drawText(
-            "HTML WIDGET VIRKER!",
-            60f,
-            180f,
-            paint
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta name="viewport"
+                      content="width=device-width, initial-scale=1">
+                <style>
+                    html, body {
+                        margin: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: #171717;
+                        color: white;
+                        font-family: sans-serif;
+                    }
+
+                    .box {
+                        box-sizing: border-box;
+                        width: 100%;
+                        height: 100%;
+                        padding: 55px;
+                    }
+
+                    h1 {
+                        font-size: 64px;
+                        margin: 0 0 25px 0;
+                    }
+
+                    p {
+                        font-size: 38px;
+                        margin: 0;
+                    }
+                </style>
+            </head>
+
+            <body>
+                <div class="box">
+                    <h1>HTML VIRKER!</h1>
+                    <p>Denne tekst kommer fra en rigtig HTML-side.</p>
+                </div>
+            </body>
+            </html>
+        """.trimIndent()
+
+        web.loadDataWithBaseURL(
+            null,
+            html,
+            "text/html",
+            "UTF-8",
+            null
         )
-
-        paint.textSize = 42f
-
-        canvas.drawText(
-            "Test af startskærms-widget",
-            60f,
-            270f,
-            paint
-        )
-
-        val manager =
-            AppWidgetManager.getInstance(this)
-
-        val ids = manager.getAppWidgetIds(
-            ComponentName(
-                this,
-                HtmlWidgetProvider::class.java
-            )
-        )
-
-        ids.forEach { id ->
-
-            val views = RemoteViews(
-                packageName,
-                R.layout.widget_layout
-            )
-
-            views.setImageViewBitmap(
-                R.id.widget_image,
-                bitmap
-            )
-
-            manager.updateAppWidget(
-                id,
-                views
-            )
-        }
-
-        stopSelf()
-
-        return START_NOT_STICKY
     }
 
     companion object {
